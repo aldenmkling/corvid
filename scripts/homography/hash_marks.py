@@ -71,13 +71,19 @@ def _cluster_steps(steps: set[int]) -> list[list[int]]:
 def _build_band_and_removal(
     lines: list, h: int, w: int, edge_angle: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build band mask and angle removal mask using pixel-walk.
+    """Build band mask and angle removal mask (vectorized).
 
-    Uses int() truncation for pixel coordinates (matching the original
-    working implementation).
+    Uses int() truncation (via .astype(int)) for pixel coordinates to
+    match the original pixel-walk implementation exactly.
     """
     band_mask = np.zeros((h, w), dtype=np.uint8)
     angle_removal = np.zeros((h, w), dtype=bool)
+
+    # Precompute offset grid: signs × distances along the normal
+    signs = np.array([-1, 1], dtype=np.float64)
+    dists = np.arange(0, BAND_WIDTH + 1, dtype=np.float64)
+    # shape: (2 * (BAND_WIDTH+1),) — all sign*dist combos
+    sd = (signs[:, None] * dists[None, :]).ravel()
 
     for line in lines:
         x_top, y_top, x_bot, y_bot = line
@@ -88,28 +94,32 @@ def _build_band_and_removal(
         ny = ldx / length
         line_angle = np.arctan2(ldy, ldx)
 
-        line_band = np.zeros((h, w), dtype=np.uint8)
         n_steps = int(length * 2)
-        for step in range(n_steps + 1):
-            t = step / n_steps
-            cx = x_top + t * ldx
-            cy = y_top + t * ldy
-            for sign in [-1, 1]:
-                for dist in range(0, BAND_WIDTH + 1):
-                    px = int(cx + sign * dist * nx)
-                    py = int(cy + sign * dist * ny)
-                    if 0 <= px < w and 0 <= py < h:
-                        line_band[py, px] = 255
-        band_mask = cv2.bitwise_or(band_mask, line_band)
+        t_arr = np.arange(n_steps + 1, dtype=np.float64) / n_steps
+        cx = x_top + t_arr * ldx  # (n_steps+1,)
+        cy = y_top + t_arr * ldy
 
-        angle_diff = edge_angle - line_angle
+        # Broadcast: center points × offsets → all band pixels
+        # px[i, j] = int(cx[i] + sd[j] * nx)
+        px = (cx[:, None] + sd[None, :] * nx).astype(int)
+        py = (cy[:, None] + sd[None, :] * ny).astype(int)
+
+        # Mask valid pixels
+        valid = (px >= 0) & (px < w) & (py >= 0) & (py < h)
+        px_v = px[valid]
+        py_v = py[valid]
+
+        band_mask[py_v, px_v] = 255
+
+        # Angle removal within this line's band
+        angle_diff = edge_angle[py_v, px_v] - line_angle
         angle_diff = (angle_diff + np.pi) % (2 * np.pi) - np.pi
         match = (
             (np.abs(angle_diff) < ANGLE_TOL)
             | (np.abs(angle_diff - np.pi) < ANGLE_TOL)
             | (np.abs(angle_diff + np.pi) < ANGLE_TOL)
         )
-        angle_removal[(line_band > 0) & match] = True
+        angle_removal[py_v[match], px_v[match]] = True
 
     return band_mask, angle_removal
 
@@ -194,25 +204,32 @@ def detect_hashes(
             if abs(ldy) > 1e-6 else 0.0
         )
 
-        left_steps: set[int] = set()
-        right_steps: set[int] = set()
+        # Vectorized hash walk: check all steps × distances at once
+        steps = np.arange(n_steps + 1)
+        t_arr = steps / n_steps
+        cx = x_top + t_arr * ldx  # (n_steps+1,)
+        cy = y_top + t_arr * ldy
+        flank_dists = np.arange(INNER_DIST, OUTER_DIST + 1, dtype=np.float64)
 
-        for step in range(n_steps + 1):
-            t = step / n_steps
-            cx = x_top + t * ldx
-            cy = y_top + t * ldy
-            for dist in range(INNER_DIST, OUTER_DIST + 1):
-                px_c = int(cx - dist * nx_l)
-                py_c = int(cy - dist * ny_l)
-                if 0 <= px_c < w and 0 <= py_c < h and hash_canny[py_c, px_c] > 0:
-                    left_steps.add(step)
-                    break
-            for dist in range(INNER_DIST, OUTER_DIST + 1):
-                px_c = int(cx + dist * nx_l)
-                py_c = int(cy + dist * ny_l)
-                if 0 <= px_c < w and 0 <= py_c < h and hash_canny[py_c, px_c] > 0:
-                    right_steps.add(step)
-                    break
+        # Left side: center - dist * normal, shape (n_steps+1, n_dists)
+        lpx = (cx[:, None] - flank_dists[None, :] * nx_l).astype(int)
+        lpy = (cy[:, None] - flank_dists[None, :] * ny_l).astype(int)
+        # Right side
+        rpx = (cx[:, None] + flank_dists[None, :] * nx_l).astype(int)
+        rpy = (cy[:, None] + flank_dists[None, :] * ny_l).astype(int)
+
+        # Clamp to valid range, look up hash_canny, check any hit per step
+        lpx_c = np.clip(lpx, 0, w - 1)
+        lpy_c = np.clip(lpy, 0, h - 1)
+        l_valid = (lpx >= 0) & (lpx < w) & (lpy >= 0) & (lpy < h)
+        l_hit = (hash_canny[lpy_c, lpx_c] > 0) & l_valid
+        left_steps = set(steps[l_hit.any(axis=1)].tolist())
+
+        rpx_c = np.clip(rpx, 0, w - 1)
+        rpy_c = np.clip(rpy, 0, h - 1)
+        r_valid = (rpx >= 0) & (rpx < w) & (rpy >= 0) & (rpy < h)
+        r_hit = (hash_canny[rpy_c, rpx_c] > 0) & r_valid
+        right_steps = set(steps[r_hit.any(axis=1)].tolist())
 
         # Cluster left and right hits independently
         l_clusters = [
