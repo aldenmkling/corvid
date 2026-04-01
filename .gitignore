@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Data (large video/clip files)
+data/
+videos/
+*.mp4
+*.pt
+
+# Output (generated images, tracking results)
+output/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
