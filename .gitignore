@@ -9,6 +9,14 @@ videos/
 *.mp4
 *.pt
 
+# But do track annotations (small text files, hard to recreate)
+!data/
+!data/annotations/
+!data/annotations/export_final/
+!data/annotations/export_final/labels/
+!data/annotations/export_final/classes.txt
+!data/annotations/200_frames_hand_labeled.zip
+
 # Output (generated images, tracking results)
 output/
 
@@ -18,6 +26,7 @@ output/
 # IDE
 .vscode/
 .idea/
+.Rhistory
 
 # Claude
 .claude/
