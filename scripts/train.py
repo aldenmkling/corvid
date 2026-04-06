@@ -19,8 +19,12 @@ IMAGES_DIR = os.path.join(ANNOTATIONS_DIR, "images")
 LABELS_DIR = os.path.join(ANNOTATIONS_DIR, "labels")
 
 
-def setup_train_val_split(val_ratio=0.15, seed=42):
-    """Split images/labels into train and val sets."""
+def setup_train_val_split(val_ratio=0.15, seed=42, verified_export_dir=None):
+    """Split images/labels into train and val sets.
+
+    If verified_export_dir is set, only use images from that Label Studio
+    export (human-verified annotations) rather than all pre-annotated images.
+    """
     random.seed(seed)
 
     train_img = os.path.join(ANNOTATIONS_DIR, "train", "images")
@@ -31,12 +35,26 @@ def setup_train_val_split(val_ratio=0.15, seed=42):
     for d in [train_img, train_lbl, val_img, val_lbl]:
         os.makedirs(d, exist_ok=True)
 
-    # Get all images that have labels
-    images = sorted([
-        f for f in os.listdir(IMAGES_DIR)
-        if f.endswith(".jpg")
-        and os.path.exists(os.path.join(LABELS_DIR, f.replace(".jpg", ".txt")))
-    ])
+    if verified_export_dir:
+        # Use only human-verified frames from Label Studio export
+        export_labels = os.path.join(verified_export_dir, "labels")
+        images = sorted([
+            f.replace(".txt", ".jpg") for f in os.listdir(export_labels)
+            if f.endswith(".txt")
+        ])
+        # Images live in the main annotations dir; only labels came from export
+        src_img_dir = IMAGES_DIR
+        src_lbl_dir = export_labels
+        print(f"Using {len(images)} verified frames from {verified_export_dir}")
+    else:
+        # Use all images that have labels
+        src_img_dir = IMAGES_DIR
+        src_lbl_dir = LABELS_DIR
+        images = sorted([
+            f for f in os.listdir(IMAGES_DIR)
+            if f.endswith(".jpg")
+            and os.path.exists(os.path.join(LABELS_DIR, f.replace(".jpg", ".txt")))
+        ])
 
     random.shuffle(images)
     val_count = max(1, int(len(images) * val_ratio))
@@ -45,11 +63,11 @@ def setup_train_val_split(val_ratio=0.15, seed=42):
     for img_name in images:
         lbl_name = img_name.replace(".jpg", ".txt")
         if img_name in val_set:
-            shutil.copy2(os.path.join(IMAGES_DIR, img_name), os.path.join(val_img, img_name))
-            shutil.copy2(os.path.join(LABELS_DIR, lbl_name), os.path.join(val_lbl, lbl_name))
+            shutil.copy2(os.path.join(src_img_dir, img_name), os.path.join(val_img, img_name))
+            shutil.copy2(os.path.join(src_lbl_dir, lbl_name), os.path.join(val_lbl, lbl_name))
         else:
-            shutil.copy2(os.path.join(IMAGES_DIR, img_name), os.path.join(train_img, img_name))
-            shutil.copy2(os.path.join(LABELS_DIR, lbl_name), os.path.join(train_lbl, lbl_name))
+            shutil.copy2(os.path.join(src_img_dir, img_name), os.path.join(train_img, img_name))
+            shutil.copy2(os.path.join(src_lbl_dir, lbl_name), os.path.join(train_lbl, lbl_name))
 
     print(f"Split: {len(images) - val_count} train, {val_count} val")
     return len(images)
@@ -57,16 +75,18 @@ def setup_train_val_split(val_ratio=0.15, seed=42):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch", type=int, default=8)
-    parser.add_argument("--model", default="yolo12x.pt",
+    parser.add_argument("--model", default="models/yolo12x.pt",
                         help="Base model to fine-tune from")
-    parser.add_argument("--imgsz", type=int, default=1280,
+    parser.add_argument("--imgsz", type=int, default=640,
                         help="Training image size")
+    parser.add_argument("--verified-export", default=None,
+                        help="Path to Label Studio YOLO export dir (verified annotations only)")
     args = parser.parse_args()
 
     # Setup train/val split
-    n_images = setup_train_val_split()
+    n_images = setup_train_val_split(verified_export_dir=args.verified_export)
     if n_images == 0:
         print("No annotated images found! Run extract + annotate first.")
         return
@@ -91,6 +111,7 @@ def main():
         epochs=args.epochs,
         batch=args.batch,
         imgsz=args.imgsz,
+
         project=os.path.join(PROJECT_ROOT, "output", "training"),
         name="all22_player_detect",
         exist_ok=True,

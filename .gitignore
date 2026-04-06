@@ -7,7 +7,13 @@ __pycache__/
 data/
 videos/
 *.mp4
+# But track the clips directory structure (not the clips themselves)
+!videos/
+!videos/clips/
+
+# Model weights (large binary files)
 *.pt
+models/
 
 # But do track annotations (small text files, hard to recreate)
 !data/

@@ -369,8 +369,8 @@ def main():
     parser.add_argument("--video", required=True, help="Path to game MP4")
     parser.add_argument("--game-id", required=True, help="Game ID (e.g. 2019092204)")
     parser.add_argument(
-        "--output", default="data/clips/",
-        help="Output directory (default: data/clips/)",
+        "--output", default="videos/clips/",
+        help="Output directory (default: videos/clips/)",
     )
     parser.add_argument(
         "--preview", action="store_true",

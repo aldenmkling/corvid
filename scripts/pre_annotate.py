@@ -36,7 +36,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--conf-thresh", type=float, default=0.20,
                         help="Confidence threshold (lower = more detections to correct)")
-    parser.add_argument("--model", default="yolo12x.pt")
+    parser.add_argument("--model", default="models/best.pt")
     args = parser.parse_args()
 
     os.makedirs(LABELS_DIR, exist_ok=True)

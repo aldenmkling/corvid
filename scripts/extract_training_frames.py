@@ -17,7 +17,10 @@ import cv2
 import numpy as np
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CLIPS_DIR = os.path.join(PROJECT_ROOT, "data", "clips", "2019092204")
+CLIPS_DIRS = [
+    os.path.join(PROJECT_ROOT, "videos", "clips", "2019092204"),   # Ravens @ Chiefs
+    os.path.join(PROJECT_ROOT, "videos", "clips", "2019102712"),   # Chiefs vs Packers
+]
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "data", "annotations", "images")
 
 
@@ -40,29 +43,29 @@ def main():
     random.seed(args.seed)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Find all play directories
-    play_dirs = sorted([
-        d for d in os.listdir(CLIPS_DIR)
-        if d.startswith("play_") and os.path.isdir(os.path.join(CLIPS_DIR, d))
-    ])
-    print(f"Found {len(play_dirs)} plays")
-
-    # Sample strategy:
-    # - Mix of sideline and endzone views
-    # - Multiple time points per clip (pre-snap, mid-play, late-play)
-    # - Spread across all plays for formation diversity
-    views = ["sideline", "endzone"]
+    # Find all play directories across all games
+    views = ["sideline"]
     # Bias toward early/mid play when players are spread out and visible
     time_points = [0.05, 0.15, 0.3, 0.5, 0.7, 0.85]
 
-    # Build candidate list: (play_dir, view, pct)
+    # Build candidate list: (game_id, play_dir, view, pct)
     candidates = []
-    for play_dir in play_dirs:
-        for view in views:
-            video_path = os.path.join(CLIPS_DIR, play_dir, f"{view}.mp4")
-            if os.path.exists(video_path):
-                for pct in time_points:
-                    candidates.append((play_dir, view, pct))
+    total_plays = 0
+    for clips_dir in CLIPS_DIRS:
+        game_id = os.path.basename(clips_dir)
+        play_dirs = sorted([
+            d for d in os.listdir(clips_dir)
+            if d.startswith("play_") and os.path.isdir(os.path.join(clips_dir, d))
+        ])
+        total_plays += len(play_dirs)
+        for play_dir in play_dirs:
+            for view in views:
+                video_path = os.path.join(clips_dir, play_dir, f"{view}.mp4")
+                if os.path.exists(video_path):
+                    for pct in time_points:
+                        candidates.append((game_id, play_dir, view, pct))
+
+    print(f"Found {total_plays} plays across {len(CLIPS_DIRS)} games")
 
     print(f"Total candidate frames: {len(candidates)}")
 
@@ -73,15 +76,16 @@ def main():
 
     print(f"Extracting {num} frames...")
     extracted = 0
-    for play_dir, view, pct in selected:
-        video_path = os.path.join(CLIPS_DIR, play_dir, f"{view}.mp4")
+    for game_id, play_dir, view, pct in selected:
+        clips_dir = next(d for d in CLIPS_DIRS if os.path.basename(d) == game_id)
+        video_path = os.path.join(clips_dir, play_dir, f"{view}.mp4")
         frame = extract_frame(video_path, pct)
         if frame is None:
             continue
 
-        # Name: play001_sideline_30.jpg
+        # Name: 2019092204_play001_sideline_30.jpg
         play_num = play_dir.replace("play_", "")
-        out_name = f"play{play_num}_{view}_{int(pct * 100):02d}.jpg"
+        out_name = f"{game_id}_play{play_num}_{view}_{int(pct * 100):02d}.jpg"
         cv2.imwrite(os.path.join(OUTPUT_DIR, out_name), frame)
         extracted += 1
 

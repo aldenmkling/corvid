@@ -13,7 +13,7 @@ import numpy as np
 from ultralytics import YOLO
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CLIPS_DIR = os.path.join(PROJECT_ROOT, "data", "clips", "2019092204")
+CLIPS_DIR = os.path.join(PROJECT_ROOT, "videos", "clips", "2019092204")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "detect_test_v12x")
 
 # Test on a few plays, grabbing frames at different points
@@ -38,7 +38,7 @@ def main():
 
     # Load pretrained YOLOv12x
     print("Loading YOLOv12x pretrained on COCO...")
-    model = YOLO("yolo12x.pt")
+    model = YOLO("models/best.pt")
 
     # COCO class 0 = person
     PERSON_CLASS = 0

@@ -17,7 +17,7 @@ OUT_DIR = "output/homography_test/hash_rebuild"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 PLAYS = [1, 5, 34, 50, 75, 100, 150]
-CLIP_DIR = "data/clips/2019092204"
+CLIP_DIR = "videos/clips/2019092204"
 
 
 def load_frame(play_num: int) -> np.ndarray:
