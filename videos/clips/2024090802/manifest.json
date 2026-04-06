@@ -1,7 +1,7 @@
 {
   "game_id": "2024090802",
   "source_video": "2024 All 22 Coaches film Wk 1 Lions Rams.mp4",
-  "total_plays": 165,
+  "total_plays": 167,
   "plays": [
     {
       "play_num": 1,
@@ -14,7 +14,7 @@
       "endzone": {
         "file": "endzone.mp4",
         "start_s": 11.9,
-        "end_s": 23.8,
+        "end_s": 23.79,
         "duration_s": 11.9
       }
     },
@@ -22,299 +22,299 @@
       "play_num": 2,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 23.8,
-        "end_s": 37.8,
-        "duration_s": 14.0
+        "start_s": 23.79,
+        "end_s": 37.75,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 37.8,
-        "end_s": 51.7,
-        "duration_s": 13.9
+        "start_s": 37.75,
+        "end_s": 51.72,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 3,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 51.7,
-        "end_s": 68.8,
-        "duration_s": 17.1
+        "start_s": 51.72,
+        "end_s": 68.79,
+        "duration_s": 17.07
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 68.8,
-        "end_s": 85.9,
-        "duration_s": 17.1
+        "start_s": 68.79,
+        "end_s": 85.85,
+        "duration_s": 17.07
       }
     },
     {
       "play_num": 4,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 85.9,
-        "end_s": 104.0,
+        "start_s": 85.85,
+        "end_s": 103.95,
         "duration_s": 18.1
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 104.0,
-        "end_s": 117.9,
-        "duration_s": 13.9
+        "start_s": 103.95,
+        "end_s": 117.92,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 5,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 117.9,
-        "end_s": 137.1,
-        "duration_s": 19.2
+        "start_s": 117.92,
+        "end_s": 137.05,
+        "duration_s": 19.14
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 137.1,
-        "end_s": 156.2,
-        "duration_s": 19.1
+        "start_s": 137.05,
+        "end_s": 156.19,
+        "duration_s": 19.14
       }
     },
     {
       "play_num": 6,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 156.2,
-        "end_s": 168.1,
+        "start_s": 156.19,
+        "end_s": 168.08,
         "duration_s": 11.9
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 168.1,
-        "end_s": 180.0,
-        "duration_s": 11.9
+        "start_s": 168.08,
+        "end_s": 179.96,
+        "duration_s": 11.88
       }
     },
     {
       "play_num": 7,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 180.0,
-        "end_s": 192.9,
-        "duration_s": 12.9
+        "start_s": 179.96,
+        "end_s": 192.91,
+        "duration_s": 12.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 192.9,
-        "end_s": 205.8,
-        "duration_s": 12.9
+        "start_s": 192.91,
+        "end_s": 205.84,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 8,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 205.8,
-        "end_s": 225.0,
-        "duration_s": 19.2
+        "start_s": 205.84,
+        "end_s": 224.96,
+        "duration_s": 19.12
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 225.0,
-        "end_s": 244.1,
-        "duration_s": 19.1
+        "start_s": 224.96,
+        "end_s": 244.11,
+        "duration_s": 19.15
       }
     },
     {
       "play_num": 9,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 244.1,
-        "end_s": 260.1,
-        "duration_s": 16.0
+        "start_s": 244.11,
+        "end_s": 260.14,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 260.1,
-        "end_s": 276.2,
-        "duration_s": 16.1
+        "start_s": 260.14,
+        "end_s": 276.16,
+        "duration_s": 16.02
       }
     },
     {
       "play_num": 10,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 276.2,
-        "end_s": 288.1,
-        "duration_s": 11.9
+        "start_s": 276.16,
+        "end_s": 288.07,
+        "duration_s": 11.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 288.1,
-        "end_s": 315.5,
-        "duration_s": 27.4
+        "start_s": 288.07,
+        "end_s": 300.48,
+        "duration_s": 12.41
       }
     },
     {
       "play_num": 11,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 315.5,
-        "end_s": 330.5,
+        "start_s": 300.48,
+        "end_s": 315.48,
         "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 330.5,
-        "end_s": 346.5,
-        "duration_s": 16.0
+        "start_s": 315.48,
+        "end_s": 330.46,
+        "duration_s": 14.98
       }
     },
     {
       "play_num": 12,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 346.5,
-        "end_s": 374.4,
-        "duration_s": 27.9
+        "start_s": 330.46,
+        "end_s": 346.51,
+        "duration_s": 16.05
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 374.4,
-        "end_s": 386.3,
-        "duration_s": 11.9
+        "start_s": 346.51,
+        "end_s": 374.42,
+        "duration_s": 27.91
       }
     },
     {
       "play_num": 13,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 386.3,
-        "end_s": 399.3,
-        "duration_s": 13.0
+        "start_s": 374.42,
+        "end_s": 386.32,
+        "duration_s": 11.9
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 399.3,
-        "end_s": 412.2,
-        "duration_s": 12.9
+        "start_s": 386.32,
+        "end_s": 399.27,
+        "duration_s": 12.95
       }
     },
     {
       "play_num": 14,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 412.2,
-        "end_s": 427.2,
-        "duration_s": 15.0
+        "start_s": 399.27,
+        "end_s": 412.2,
+        "duration_s": 12.93
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 427.2,
-        "end_s": 442.2,
-        "duration_s": 15.0
+        "start_s": 412.2,
+        "end_s": 427.18,
+        "duration_s": 14.98
       }
     },
     {
       "play_num": 15,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 442.2,
-        "end_s": 457.2,
-        "duration_s": 15.0
+        "start_s": 427.18,
+        "end_s": 442.19,
+        "duration_s": 15.01
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 457.2,
-        "end_s": 472.1,
-        "duration_s": 14.9
+        "start_s": 442.19,
+        "end_s": 457.19,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 16,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 472.1,
-        "end_s": 484.1,
-        "duration_s": 12.0
+        "start_s": 457.19,
+        "end_s": 472.19,
+        "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 484.1,
-        "end_s": 496.0,
-        "duration_s": 11.9
+        "start_s": 472.19,
+        "end_s": 484.07,
+        "duration_s": 11.88
       }
     },
     {
       "play_num": 17,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 496.0,
-        "end_s": 514.1,
-        "duration_s": 18.1
+        "start_s": 484.07,
+        "end_s": 514.08,
+        "duration_s": 30.01
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 514.1,
-        "end_s": 532.2,
-        "duration_s": 18.1
+        "start_s": 514.08,
+        "end_s": 532.16,
+        "duration_s": 18.08
       }
     },
     {
       "play_num": 18,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 532.2,
-        "end_s": 546.1,
-        "duration_s": 13.9
+        "start_s": 532.16,
+        "end_s": 546.15,
+        "duration_s": 13.98
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 546.1,
-        "end_s": 577.2,
-        "duration_s": 31.1
+        "start_s": 546.15,
+        "end_s": 577.16,
+        "duration_s": 31.01
       }
     },
     {
       "play_num": 19,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 577.2,
-        "end_s": 590.1,
-        "duration_s": 12.9
+        "start_s": 577.16,
+        "end_s": 590.09,
+        "duration_s": 12.93
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 590.1,
-        "end_s": 604.1,
-        "duration_s": 14.0
+        "start_s": 590.09,
+        "end_s": 604.07,
+        "duration_s": 13.98
       }
     },
     {
       "play_num": 20,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 604.1,
-        "end_s": 618.0,
-        "duration_s": 13.9
+        "start_s": 604.07,
+        "end_s": 618.03,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 618.0,
-        "end_s": 643.9,
-        "duration_s": 25.9
+        "start_s": 618.03,
+        "end_s": 630.95,
+        "duration_s": 12.91
       }
     },
     {
       "play_num": 21,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 643.9,
-        "end_s": 655.8,
-        "duration_s": 11.9
+        "start_s": 630.95,
+        "end_s": 655.79,
+        "duration_s": 24.84
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 655.8,
-        "end_s": 667.7,
+        "start_s": 655.79,
+        "end_s": 667.68,
         "duration_s": 11.9
       }
     },
@@ -322,14 +322,14 @@
       "play_num": 22,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 667.7,
-        "end_s": 680.1,
+        "start_s": 667.68,
+        "end_s": 680.08,
         "duration_s": 12.4
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 680.1,
-        "end_s": 692.0,
+        "start_s": 680.08,
+        "end_s": 691.97,
         "duration_s": 11.9
       }
     },
@@ -337,149 +337,149 @@
       "play_num": 23,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 692.0,
-        "end_s": 708.0,
-        "duration_s": 16.0
+        "start_s": 691.97,
+        "end_s": 708.02,
+        "duration_s": 16.05
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 708.0,
-        "end_s": 721.0,
-        "duration_s": 13.0
+        "start_s": 708.02,
+        "end_s": 720.95,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 24,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 721.0,
+        "start_s": 720.95,
         "end_s": 734.9,
-        "duration_s": 13.9
+        "duration_s": 13.95
       },
       "endzone": {
         "file": "endzone.mp4",
         "start_s": 734.9,
-        "end_s": 748.9,
-        "duration_s": 14.0
+        "end_s": 748.86,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 25,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 748.9,
-        "end_s": 761.8,
-        "duration_s": 12.9
+        "start_s": 748.86,
+        "end_s": 761.81,
+        "duration_s": 12.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 761.8,
-        "end_s": 775.2,
-        "duration_s": 13.4
+        "start_s": 761.81,
+        "end_s": 775.24,
+        "duration_s": 13.43
       }
     },
     {
       "play_num": 26,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 775.2,
-        "end_s": 790.8,
-        "duration_s": 15.6
+        "start_s": 775.24,
+        "end_s": 790.76,
+        "duration_s": 15.52
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 790.8,
-        "end_s": 806.8,
-        "duration_s": 16.0
+        "start_s": 790.76,
+        "end_s": 806.81,
+        "duration_s": 16.05
       }
     },
     {
       "play_num": 27,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 806.8,
-        "end_s": 825.9,
-        "duration_s": 19.1
+        "start_s": 806.81,
+        "end_s": 825.93,
+        "duration_s": 19.12
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 825.9,
-        "end_s": 845.1,
-        "duration_s": 19.2
+        "start_s": 825.93,
+        "end_s": 845.06,
+        "duration_s": 19.14
       }
     },
     {
       "play_num": 28,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 845.1,
-        "end_s": 864.7,
-        "duration_s": 19.6
+        "start_s": 845.06,
+        "end_s": 864.73,
+        "duration_s": 19.67
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 864.7,
-        "end_s": 884.4,
-        "duration_s": 19.7
+        "start_s": 864.73,
+        "end_s": 884.37,
+        "duration_s": 19.64
       }
     },
     {
       "play_num": 29,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 884.4,
-        "end_s": 895.7,
-        "duration_s": 11.3
+        "start_s": 884.37,
+        "end_s": 895.74,
+        "duration_s": 11.38
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 895.7,
-        "end_s": 906.6,
-        "duration_s": 10.9
+        "start_s": 895.74,
+        "end_s": 906.61,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 30,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 906.6,
-        "end_s": 923.7,
-        "duration_s": 17.1
+        "start_s": 906.61,
+        "end_s": 923.67,
+        "duration_s": 17.07
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 923.7,
-        "end_s": 940.7,
-        "duration_s": 17.0
+        "start_s": 923.67,
+        "end_s": 940.74,
+        "duration_s": 17.07
       }
     },
     {
       "play_num": 31,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 940.7,
-        "end_s": 952.6,
+        "start_s": 940.74,
+        "end_s": 952.64,
         "duration_s": 11.9
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 952.6,
-        "end_s": 964.5,
-        "duration_s": 11.9
+        "start_s": 952.64,
+        "end_s": 964.55,
+        "duration_s": 11.91
       }
     },
     {
       "play_num": 32,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 964.5,
-        "end_s": 976.4,
-        "duration_s": 11.9
+        "start_s": 964.55,
+        "end_s": 976.43,
+        "duration_s": 11.88
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 976.4,
-        "end_s": 988.3,
+        "start_s": 976.43,
+        "end_s": 988.32,
         "duration_s": 11.9
       }
     },
@@ -487,14 +487,14 @@
       "play_num": 33,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 988.3,
-        "end_s": 1006.4,
+        "start_s": 988.32,
+        "end_s": 1006.42,
         "duration_s": 18.1
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1006.4,
-        "end_s": 1024.5,
+        "start_s": 1006.42,
+        "end_s": 1024.52,
         "duration_s": 18.1
       }
     },
@@ -502,134 +502,134 @@
       "play_num": 34,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1024.5,
-        "end_s": 1041.6,
-        "duration_s": 17.1
+        "start_s": 1024.52,
+        "end_s": 1041.59,
+        "duration_s": 17.07
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1041.6,
-        "end_s": 1055.6,
-        "duration_s": 14.0
+        "start_s": 1041.59,
+        "end_s": 1055.55,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 35,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1055.6,
-        "end_s": 1074.2,
-        "duration_s": 18.6
+        "start_s": 1055.55,
+        "end_s": 1074.17,
+        "duration_s": 18.62
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1074.2,
-        "end_s": 1092.8,
-        "duration_s": 18.6
+        "start_s": 1074.17,
+        "end_s": 1092.79,
+        "duration_s": 18.62
       }
     },
     {
       "play_num": 36,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1092.8,
-        "end_s": 1111.9,
-        "duration_s": 19.1
+        "start_s": 1092.79,
+        "end_s": 1111.93,
+        "duration_s": 19.14
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1111.9,
-        "end_s": 1131.1,
-        "duration_s": 19.2
+        "start_s": 1111.93,
+        "end_s": 1131.06,
+        "duration_s": 19.14
       }
     },
     {
       "play_num": 37,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1131.1,
-        "end_s": 1140.9,
-        "duration_s": 9.8
+        "start_s": 1131.06,
+        "end_s": 1140.89,
+        "duration_s": 9.83
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1140.9,
-        "end_s": 1150.7,
-        "duration_s": 9.8
+        "start_s": 1140.89,
+        "end_s": 1150.72,
+        "duration_s": 9.83
       }
     },
     {
       "play_num": 38,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1150.7,
-        "end_s": 1166.7,
-        "duration_s": 16.0
+        "start_s": 1150.72,
+        "end_s": 1166.75,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1166.7,
-        "end_s": 1182.8,
-        "duration_s": 16.1
+        "start_s": 1166.75,
+        "end_s": 1182.78,
+        "duration_s": 16.03
       }
     },
     {
       "play_num": 39,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1182.8,
-        "end_s": 1195.7,
-        "duration_s": 12.9
+        "start_s": 1182.78,
+        "end_s": 1195.71,
+        "duration_s": 12.93
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1195.7,
-        "end_s": 1208.6,
-        "duration_s": 12.9
+        "start_s": 1195.71,
+        "end_s": 1208.64,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 40,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1208.6,
-        "end_s": 1225.7,
-        "duration_s": 17.1
+        "start_s": 1208.64,
+        "end_s": 1225.71,
+        "duration_s": 17.07
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1225.7,
-        "end_s": 1242.8,
-        "duration_s": 17.1
+        "start_s": 1225.71,
+        "end_s": 1242.77,
+        "duration_s": 17.07
       }
     },
     {
       "play_num": 41,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1242.8,
-        "end_s": 1258.8,
-        "duration_s": 16.0
+        "start_s": 1242.77,
+        "end_s": 1258.81,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1258.8,
-        "end_s": 1270.7,
-        "duration_s": 11.9
+        "start_s": 1258.81,
+        "end_s": 1270.69,
+        "duration_s": 11.88
       }
     },
     {
       "play_num": 42,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1270.7,
-        "end_s": 1291.9,
-        "duration_s": 21.2
+        "start_s": 1270.69,
+        "end_s": 1291.91,
+        "duration_s": 21.22
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1291.9,
-        "end_s": 1313.1,
+        "start_s": 1291.91,
+        "end_s": 1313.11,
         "duration_s": 21.2
       }
     },
@@ -637,284 +637,284 @@
       "play_num": 43,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1313.1,
-        "end_s": 1330.2,
-        "duration_s": 17.1
+        "start_s": 1313.11,
+        "end_s": 1330.18,
+        "duration_s": 17.07
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1330.2,
-        "end_s": 1347.2,
-        "duration_s": 17.0
+        "start_s": 1330.18,
+        "end_s": 1362.24,
+        "duration_s": 32.07
       }
     },
     {
       "play_num": 44,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1347.2,
-        "end_s": 1362.2,
-        "duration_s": 15.0
+        "start_s": 1362.24,
+        "end_s": 1374.12,
+        "duration_s": 11.88
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1362.2,
-        "end_s": 1374.1,
-        "duration_s": 11.9
+        "start_s": 1374.12,
+        "end_s": 1390.17,
+        "duration_s": 16.05
       }
     },
     {
       "play_num": 45,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1374.1,
-        "end_s": 1390.2,
-        "duration_s": 16.1
+        "start_s": 1390.17,
+        "end_s": 1406.2,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1390.2,
-        "end_s": 1406.2,
-        "duration_s": 16.0
+        "start_s": 1406.2,
+        "end_s": 1418.1,
+        "duration_s": 11.9
       }
     },
     {
       "play_num": 46,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1406.2,
-        "end_s": 1418.1,
+        "start_s": 1418.1,
+        "end_s": 1430.0,
         "duration_s": 11.9
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1418.1,
-        "end_s": 1430.0,
-        "duration_s": 11.9
+        "start_s": 1430.0,
+        "end_s": 1440.86,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 47,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1430.0,
-        "end_s": 1440.9,
-        "duration_s": 10.9
+        "start_s": 1440.86,
+        "end_s": 1451.72,
+        "duration_s": 10.86
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1440.9,
-        "end_s": 1451.7,
-        "duration_s": 10.8
+        "start_s": 1451.72,
+        "end_s": 1471.87,
+        "duration_s": 20.15
       }
     },
     {
       "play_num": 48,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1451.7,
-        "end_s": 1471.9,
-        "duration_s": 20.2
+        "start_s": 1471.87,
+        "end_s": 1487.92,
+        "duration_s": 16.05
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1471.9,
-        "end_s": 1487.9,
-        "duration_s": 16.0
+        "start_s": 1487.92,
+        "end_s": 1503.95,
+        "duration_s": 16.03
       }
     },
     {
       "play_num": 49,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1487.9,
-        "end_s": 1504.0,
-        "duration_s": 16.1
+        "start_s": 1503.95,
+        "end_s": 1519.97,
+        "duration_s": 16.02
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1504.0,
-        "end_s": 1520.0,
-        "duration_s": 16.0
+        "start_s": 1519.97,
+        "end_s": 1532.91,
+        "duration_s": 12.95
       }
     },
     {
       "play_num": 50,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1520.0,
-        "end_s": 1532.9,
-        "duration_s": 12.9
+        "start_s": 1532.91,
+        "end_s": 1546.36,
+        "duration_s": 13.45
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1532.9,
-        "end_s": 1546.4,
-        "duration_s": 13.5
+        "start_s": 1546.36,
+        "end_s": 1562.39,
+        "duration_s": 16.03
       }
     },
     {
       "play_num": 51,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1546.4,
-        "end_s": 1562.4,
-        "duration_s": 16.0
+        "start_s": 1562.39,
+        "end_s": 1577.89,
+        "duration_s": 15.5
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1562.4,
-        "end_s": 1577.9,
-        "duration_s": 15.5
+        "start_s": 1577.89,
+        "end_s": 1593.94,
+        "duration_s": 16.05
       }
     },
     {
       "play_num": 52,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1577.9,
-        "end_s": 1593.9,
-        "duration_s": 16.0
+        "start_s": 1593.94,
+        "end_s": 1609.98,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1593.9,
-        "end_s": 1610.0,
-        "duration_s": 16.1
+        "start_s": 1609.98,
+        "end_s": 1623.92,
+        "duration_s": 13.95
       }
     },
     {
       "play_num": 53,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1610.0,
-        "end_s": 1623.9,
-        "duration_s": 13.9
+        "start_s": 1623.92,
+        "end_s": 1637.9,
+        "duration_s": 13.98
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1623.9,
-        "end_s": 1637.9,
-        "duration_s": 14.0
+        "start_s": 1637.9,
+        "end_s": 1652.9,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 54,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1637.9,
-        "end_s": 1652.9,
+        "start_s": 1652.9,
+        "end_s": 1667.9,
         "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1652.9,
-        "end_s": 1667.9,
-        "duration_s": 15.0
+        "start_s": 1667.9,
+        "end_s": 1681.33,
+        "duration_s": 13.43
       }
     },
     {
       "play_num": 55,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1667.9,
-        "end_s": 1681.3,
-        "duration_s": 13.4
+        "start_s": 1681.33,
+        "end_s": 1694.28,
+        "duration_s": 12.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1681.3,
-        "end_s": 1694.3,
-        "duration_s": 13.0
+        "start_s": 1694.28,
+        "end_s": 1707.21,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 56,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1694.3,
-        "end_s": 1707.2,
-        "duration_s": 12.9
+        "start_s": 1707.21,
+        "end_s": 1720.12,
+        "duration_s": 12.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1707.2,
-        "end_s": 1720.1,
-        "duration_s": 12.9
+        "start_s": 1720.12,
+        "end_s": 1734.08,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 57,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1720.1,
-        "end_s": 1734.1,
-        "duration_s": 14.0
+        "start_s": 1734.08,
+        "end_s": 1748.06,
+        "duration_s": 13.98
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1734.1,
-        "end_s": 1748.1,
-        "duration_s": 14.0
+        "start_s": 1748.06,
+        "end_s": 1760.99,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 58,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1748.1,
-        "end_s": 1761.0,
-        "duration_s": 12.9
+        "start_s": 1760.99,
+        "end_s": 1774.42,
+        "duration_s": 13.43
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1761.0,
-        "end_s": 1774.4,
-        "duration_s": 13.4
+        "start_s": 1774.42,
+        "end_s": 1786.32,
+        "duration_s": 11.9
       }
     },
     {
       "play_num": 59,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1774.4,
-        "end_s": 1786.3,
-        "duration_s": 11.9
+        "start_s": 1786.32,
+        "end_s": 1798.23,
+        "duration_s": 11.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1786.3,
-        "end_s": 1798.2,
-        "duration_s": 11.9
+        "start_s": 1798.23,
+        "end_s": 1809.09,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 60,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1798.2,
-        "end_s": 1809.1,
-        "duration_s": 10.9
+        "start_s": 1809.09,
+        "end_s": 1819.93,
+        "duration_s": 10.84
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1809.1,
-        "end_s": 1819.9,
-        "duration_s": 10.8
+        "start_s": 1819.93,
+        "end_s": 1831.83,
+        "duration_s": 11.9
       }
     },
     {
       "play_num": 61,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1819.9,
-        "end_s": 1831.8,
-        "duration_s": 11.9
+        "start_s": 1831.83,
+        "end_s": 1843.74,
+        "duration_s": 11.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1831.8,
-        "end_s": 1843.7,
+        "start_s": 1843.74,
+        "end_s": 1855.64,
         "duration_s": 11.9
       }
     },
@@ -922,224 +922,224 @@
       "play_num": 62,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1843.7,
-        "end_s": 1855.6,
-        "duration_s": 11.9
+        "start_s": 1855.64,
+        "end_s": 1868.03,
+        "duration_s": 12.4
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1855.6,
-        "end_s": 1868.0,
-        "duration_s": 12.4
+        "start_s": 1868.03,
+        "end_s": 1883.03,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 63,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1868.0,
-        "end_s": 1883.0,
-        "duration_s": 15.0
+        "start_s": 1883.03,
+        "end_s": 1898.05,
+        "duration_s": 15.01
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1883.0,
-        "end_s": 1898.0,
-        "duration_s": 15.0
+        "start_s": 1898.05,
+        "end_s": 1912.01,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 64,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1898.0,
-        "end_s": 1912.0,
-        "duration_s": 14.0
+        "start_s": 1912.01,
+        "end_s": 1925.96,
+        "duration_s": 13.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1912.0,
-        "end_s": 1926.0,
-        "duration_s": 14.0
+        "start_s": 1925.96,
+        "end_s": 1937.85,
+        "duration_s": 11.9
       }
     },
     {
       "play_num": 65,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1926.0,
-        "end_s": 1937.9,
-        "duration_s": 11.9
+        "start_s": 1937.85,
+        "end_s": 1949.76,
+        "duration_s": 11.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1937.9,
-        "end_s": 1949.8,
-        "duration_s": 11.9
+        "start_s": 1949.76,
+        "end_s": 1964.76,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 66,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1949.8,
-        "end_s": 1964.8,
-        "duration_s": 15.0
+        "start_s": 1964.76,
+        "end_s": 1979.74,
+        "duration_s": 14.98
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1964.8,
-        "end_s": 1979.7,
-        "duration_s": 14.9
+        "start_s": 1979.74,
+        "end_s": 1996.81,
+        "duration_s": 17.07
       }
     },
     {
       "play_num": 67,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 1979.7,
-        "end_s": 1996.8,
-        "duration_s": 17.1
+        "start_s": 1996.81,
+        "end_s": 2013.9,
+        "duration_s": 17.08
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 1996.8,
-        "end_s": 2013.9,
-        "duration_s": 17.1
+        "start_s": 2013.9,
+        "end_s": 2038.19,
+        "duration_s": 24.29
       }
     },
     {
       "play_num": 68,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2013.9,
-        "end_s": 2038.2,
-        "duration_s": 24.3
+        "start_s": 2038.19,
+        "end_s": 2062.51,
+        "duration_s": 24.32
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2038.2,
-        "end_s": 2062.5,
-        "duration_s": 24.3
+        "start_s": 2062.51,
+        "end_s": 2076.46,
+        "duration_s": 13.95
       }
     },
     {
       "play_num": 69,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2062.5,
-        "end_s": 2076.4,
-        "duration_s": 13.9
+        "start_s": 2076.46,
+        "end_s": 2090.42,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2076.4,
-        "end_s": 2090.4,
-        "duration_s": 14.0
+        "start_s": 2090.42,
+        "end_s": 2107.51,
+        "duration_s": 17.08
       }
     },
     {
       "play_num": 70,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2090.4,
-        "end_s": 2107.5,
-        "duration_s": 17.1
+        "start_s": 2107.51,
+        "end_s": 2120.42,
+        "duration_s": 12.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2107.5,
-        "end_s": 2120.4,
-        "duration_s": 12.9
+        "start_s": 2120.42,
+        "end_s": 2136.45,
+        "duration_s": 16.03
       }
     },
     {
       "play_num": 71,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2120.4,
-        "end_s": 2136.5,
-        "duration_s": 16.1
+        "start_s": 2136.45,
+        "end_s": 2152.48,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2136.5,
-        "end_s": 2152.5,
-        "duration_s": 16.0
+        "start_s": 2152.48,
+        "end_s": 2166.46,
+        "duration_s": 13.98
       }
     },
     {
       "play_num": 72,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2152.5,
-        "end_s": 2166.5,
-        "duration_s": 14.0
+        "start_s": 2166.46,
+        "end_s": 2180.41,
+        "duration_s": 13.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2166.5,
-        "end_s": 2180.4,
-        "duration_s": 13.9
+        "start_s": 2180.41,
+        "end_s": 2191.27,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 73,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2180.4,
-        "end_s": 2191.3,
-        "duration_s": 10.9
+        "start_s": 2191.27,
+        "end_s": 2202.13,
+        "duration_s": 10.86
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2191.3,
-        "end_s": 2202.1,
-        "duration_s": 10.8
+        "start_s": 2202.13,
+        "end_s": 2214.05,
+        "duration_s": 11.91
       }
     },
     {
       "play_num": 74,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2202.1,
-        "end_s": 2214.0,
-        "duration_s": 11.9
+        "start_s": 2214.05,
+        "end_s": 2226.44,
+        "duration_s": 12.4
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2214.0,
-        "end_s": 2226.4,
-        "duration_s": 12.4
+        "start_s": 2226.44,
+        "end_s": 2240.4,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 75,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2226.4,
-        "end_s": 2240.4,
-        "duration_s": 14.0
+        "start_s": 2240.4,
+        "end_s": 2254.37,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2240.4,
-        "end_s": 2254.4,
-        "duration_s": 14.0
+        "start_s": 2254.37,
+        "end_s": 2272.47,
+        "duration_s": 18.1
       }
     },
     {
       "play_num": 76,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2254.4,
-        "end_s": 2272.5,
+        "start_s": 2272.47,
+        "end_s": 2290.57,
         "duration_s": 18.1
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2272.5,
-        "end_s": 2290.6,
+        "start_s": 2290.57,
+        "end_s": 2308.67,
         "duration_s": 18.1
       }
     },
@@ -1147,405 +1147,405 @@
       "play_num": 77,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2290.6,
-        "end_s": 2308.7,
+        "start_s": 2308.67,
+        "end_s": 2326.77,
         "duration_s": 18.1
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2308.7,
-        "end_s": 2326.8,
-        "duration_s": 18.1
+        "start_s": 2326.77,
+        "end_s": 2339.7,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 78,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2326.8,
-        "end_s": 2339.7,
-        "duration_s": 12.9
+        "start_s": 2339.7,
+        "end_s": 2352.63,
+        "duration_s": 12.93
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2339.7,
-        "end_s": 2352.6,
-        "duration_s": 12.9
+        "start_s": 2352.63,
+        "end_s": 2368.67,
+        "duration_s": 16.03
       }
     },
     {
       "play_num": 79,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2352.6,
-        "end_s": 2368.7,
-        "duration_s": 16.1
+        "start_s": 2368.67,
+        "end_s": 2384.7,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2368.7,
-        "end_s": 2384.7,
-        "duration_s": 16.0
+        "start_s": 2384.7,
+        "end_s": 2399.7,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 80,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2384.7,
-        "end_s": 2399.7,
-        "duration_s": 15.0
+        "start_s": 2399.7,
+        "end_s": 2414.71,
+        "duration_s": 15.02
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2399.7,
-        "end_s": 2414.7,
-        "duration_s": 15.0
+        "start_s": 2414.71,
+        "end_s": 2433.83,
+        "duration_s": 19.12
       }
     },
     {
       "play_num": 81,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2414.7,
-        "end_s": 2433.8,
-        "duration_s": 19.1
+        "start_s": 2433.83,
+        "end_s": 2452.97,
+        "duration_s": 19.14
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2433.8,
-        "end_s": 2453.0,
-        "duration_s": 19.2
+        "start_s": 2452.97,
+        "end_s": 2465.9,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 82,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2453.0,
-        "end_s": 2465.9,
-        "duration_s": 12.9
+        "start_s": 2465.9,
+        "end_s": 2478.83,
+        "duration_s": 12.93
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2465.9,
-        "end_s": 2478.8,
-        "duration_s": 12.9
+        "start_s": 2478.83,
+        "end_s": 2492.79,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 83,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2478.8,
-        "end_s": 2492.8,
-        "duration_s": 14.0
+        "start_s": 2492.79,
+        "end_s": 2506.75,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2492.8,
-        "end_s": 2506.8,
-        "duration_s": 14.0
+        "start_s": 2506.75,
+        "end_s": 2517.1,
+        "duration_s": 10.34
       }
     },
     {
       "play_num": 84,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2506.8,
-        "end_s": 2522.8,
-        "duration_s": 16.0
+        "start_s": 2522.79,
+        "end_s": 2538.82,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2522.8,
-        "end_s": 2538.8,
-        "duration_s": 16.0
+        "start_s": 2538.82,
+        "end_s": 2549.68,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 85,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2538.8,
-        "end_s": 2549.7,
-        "duration_s": 10.9
+        "start_s": 2549.68,
+        "end_s": 2560.54,
+        "duration_s": 10.86
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2549.7,
-        "end_s": 2560.5,
-        "duration_s": 10.8
+        "start_s": 2560.54,
+        "end_s": 2573.47,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 86,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2560.5,
-        "end_s": 2573.5,
-        "duration_s": 13.0
+        "start_s": 2573.47,
+        "end_s": 2586.92,
+        "duration_s": 13.45
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2573.5,
-        "end_s": 2586.9,
-        "duration_s": 13.4
+        "start_s": 2586.92,
+        "end_s": 2607.61,
+        "duration_s": 20.69
       }
     },
     {
       "play_num": 87,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2586.9,
-        "end_s": 2607.6,
-        "duration_s": 20.7
+        "start_s": 2607.61,
+        "end_s": 2628.81,
+        "duration_s": 21.2
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2607.6,
-        "end_s": 2628.8,
-        "duration_s": 21.2
+        "start_s": 2628.81,
+        "end_s": 2649.5,
+        "duration_s": 20.69
       }
     },
     {
       "play_num": 88,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2628.8,
-        "end_s": 2649.5,
-        "duration_s": 20.7
+        "start_s": 2649.5,
+        "end_s": 2670.68,
+        "duration_s": 21.19
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2649.5,
-        "end_s": 2670.7,
-        "duration_s": 21.2
+        "start_s": 2670.68,
+        "end_s": 2693.46,
+        "duration_s": 22.77
       }
     },
     {
       "play_num": 89,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2670.7,
-        "end_s": 2693.5,
-        "duration_s": 22.8
+        "start_s": 2693.46,
+        "end_s": 2716.2,
+        "duration_s": 22.74
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2693.5,
-        "end_s": 2716.2,
-        "duration_s": 22.7
+        "start_s": 2716.2,
+        "end_s": 2739.49,
+        "duration_s": 23.29
       }
     },
     {
       "play_num": 90,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2716.2,
-        "end_s": 2739.5,
-        "duration_s": 23.3
+        "start_s": 2739.49,
+        "end_s": 2762.76,
+        "duration_s": 23.27
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2739.5,
-        "end_s": 2762.8,
-        "duration_s": 23.3
+        "start_s": 2762.76,
+        "end_s": 2777.76,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 91,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2762.8,
-        "end_s": 2777.8,
+        "start_s": 2777.76,
+        "end_s": 2792.76,
         "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2777.8,
-        "end_s": 2792.8,
-        "duration_s": 15.0
+        "start_s": 2792.76,
+        "end_s": 2806.72,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 92,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2792.8,
-        "end_s": 2806.7,
-        "duration_s": 13.9
+        "start_s": 2806.72,
+        "end_s": 2820.67,
+        "duration_s": 13.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2806.7,
-        "end_s": 2820.7,
-        "duration_s": 14.0
+        "start_s": 2820.67,
+        "end_s": 2836.72,
+        "duration_s": 16.05
       }
     },
     {
       "play_num": 93,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2820.7,
-        "end_s": 2836.7,
-        "duration_s": 16.0
+        "start_s": 2836.72,
+        "end_s": 2852.75,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2836.7,
-        "end_s": 2852.7,
-        "duration_s": 16.0
+        "start_s": 2852.75,
+        "end_s": 2868.77,
+        "duration_s": 16.02
       }
     },
     {
       "play_num": 94,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2852.7,
-        "end_s": 2868.8,
-        "duration_s": 16.1
+        "start_s": 2868.77,
+        "end_s": 2884.82,
+        "duration_s": 16.05
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2868.8,
-        "end_s": 2884.8,
-        "duration_s": 16.0
+        "start_s": 2884.82,
+        "end_s": 2902.4,
+        "duration_s": 17.58
       }
     },
     {
       "play_num": 95,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2884.8,
-        "end_s": 2902.4,
-        "duration_s": 17.6
+        "start_s": 2902.4,
+        "end_s": 2920.48,
+        "duration_s": 18.08
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2902.4,
-        "end_s": 2920.5,
-        "duration_s": 18.1
+        "start_s": 2920.48,
+        "end_s": 2942.74,
+        "duration_s": 22.26
       }
     },
     {
       "play_num": 96,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2920.5,
-        "end_s": 2942.7,
-        "duration_s": 22.2
+        "start_s": 2942.74,
+        "end_s": 2964.96,
+        "duration_s": 22.22
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2942.7,
-        "end_s": 2965.0,
-        "duration_s": 22.3
+        "start_s": 2964.96,
+        "end_s": 2987.22,
+        "duration_s": 22.26
       }
     },
     {
       "play_num": 97,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 2965.0,
-        "end_s": 2987.2,
-        "duration_s": 22.2
+        "start_s": 2987.22,
+        "end_s": 3008.94,
+        "duration_s": 21.72
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 2987.2,
-        "end_s": 3008.9,
-        "duration_s": 21.7
+        "start_s": 3008.94,
+        "end_s": 3021.85,
+        "duration_s": 12.91
       }
     },
     {
       "play_num": 98,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3008.9,
-        "end_s": 3021.9,
-        "duration_s": 13.0
+        "start_s": 3021.85,
+        "end_s": 3034.8,
+        "duration_s": 12.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3021.9,
-        "end_s": 3034.8,
-        "duration_s": 12.9
+        "start_s": 3034.8,
+        "end_s": 3045.66,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 99,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3034.8,
-        "end_s": 3045.7,
-        "duration_s": 10.9
+        "start_s": 3045.66,
+        "end_s": 3056.52,
+        "duration_s": 10.86
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3045.7,
-        "end_s": 3056.5,
-        "duration_s": 10.8
+        "start_s": 3056.52,
+        "end_s": 3068.4,
+        "duration_s": 11.88
       }
     },
     {
       "play_num": 100,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3056.5,
-        "end_s": 3068.4,
+        "start_s": 3068.4,
+        "end_s": 3080.29,
         "duration_s": 11.9
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3068.4,
-        "end_s": 3080.3,
-        "duration_s": 11.9
+        "start_s": 3080.29,
+        "end_s": 3099.45,
+        "duration_s": 19.15
       }
     },
     {
       "play_num": 101,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3080.3,
-        "end_s": 3099.4,
-        "duration_s": 19.1
+        "start_s": 3099.45,
+        "end_s": 3112.93,
+        "duration_s": 13.48
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3099.4,
-        "end_s": 3118.0,
-        "duration_s": 18.6
+        "start_s": 3112.93,
+        "end_s": 3118.05,
+        "duration_s": 5.12
       }
     },
     {
       "play_num": 102,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3118.0,
-        "end_s": 3133.0,
+        "start_s": 3118.05,
+        "end_s": 3133.05,
         "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3133.0,
-        "end_s": 3148.1,
-        "duration_s": 15.1
+        "start_s": 3133.05,
+        "end_s": 3148.06,
+        "duration_s": 15.02
       }
     },
     {
       "play_num": 103,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3148.1,
-        "end_s": 3167.2,
-        "duration_s": 19.1
+        "start_s": 3148.06,
+        "end_s": 3167.18,
+        "duration_s": 19.12
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3167.2,
+        "start_s": 3167.18,
         "end_s": 3185.8,
-        "duration_s": 18.6
+        "duration_s": 18.62
       }
     },
     {
@@ -1553,44 +1553,44 @@
       "sideline": {
         "file": "sideline.mp4",
         "start_s": 3185.8,
-        "end_s": 3203.9,
-        "duration_s": 18.1
+        "end_s": 3203.92,
+        "duration_s": 18.12
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3203.9,
-        "end_s": 3221.5,
-        "duration_s": 17.6
+        "start_s": 3203.92,
+        "end_s": 3221.48,
+        "duration_s": 17.57
       }
     },
     {
       "play_num": 105,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3221.5,
-        "end_s": 3232.3,
-        "duration_s": 10.8
+        "start_s": 3221.48,
+        "end_s": 3232.35,
+        "duration_s": 10.86
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3232.3,
-        "end_s": 3243.2,
-        "duration_s": 10.9
+        "start_s": 3232.35,
+        "end_s": 3243.22,
+        "duration_s": 10.88
       }
     },
     {
       "play_num": 106,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3243.2,
+        "start_s": 3243.22,
         "end_s": 3267.0,
-        "duration_s": 23.8
+        "duration_s": 23.77
       },
       "endzone": {
         "file": "endzone.mp4",
         "start_s": 3267.0,
         "end_s": 3291.3,
-        "duration_s": 24.3
+        "duration_s": 24.31
       }
     },
     {
@@ -1598,508 +1598,508 @@
       "sideline": {
         "file": "sideline.mp4",
         "start_s": 3291.3,
-        "end_s": 3308.4,
-        "duration_s": 17.1
+        "end_s": 3308.39,
+        "duration_s": 17.08
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3308.4,
-        "end_s": 3325.4,
-        "duration_s": 17.0
+        "start_s": 3308.39,
+        "end_s": 3325.44,
+        "duration_s": 17.05
       }
     },
     {
       "play_num": 108,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3325.4,
-        "end_s": 3355.5,
-        "duration_s": 30.1
+        "start_s": 3325.44,
+        "end_s": 3355.45,
+        "duration_s": 30.01
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3355.5,
-        "end_s": 3370.4,
-        "duration_s": 14.9
+        "start_s": 3355.45,
+        "end_s": 3370.43,
+        "duration_s": 14.98
       }
     },
     {
       "play_num": 109,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3370.4,
-        "end_s": 3385.4,
+        "start_s": 3370.43,
+        "end_s": 3385.43,
         "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3385.4,
-        "end_s": 3398.4,
-        "duration_s": 13.0
+        "start_s": 3385.43,
+        "end_s": 3395.28,
+        "duration_s": 9.84
       }
     },
     {
       "play_num": 110,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3398.4,
-        "end_s": 3411.3,
-        "duration_s": 12.9
+        "start_s": 3395.28,
+        "end_s": 3398.38,
+        "duration_s": 3.1
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3411.3,
-        "end_s": 3426.3,
-        "duration_s": 15.0
+        "start_s": 3398.38,
+        "end_s": 3411.31,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 111,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3426.3,
-        "end_s": 3441.3,
-        "duration_s": 15.0
+        "start_s": 3411.31,
+        "end_s": 3426.29,
+        "duration_s": 14.98
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3441.3,
-        "end_s": 3457.3,
-        "duration_s": 16.0
+        "start_s": 3426.29,
+        "end_s": 3441.29,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 112,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3457.3,
-        "end_s": 3473.4,
-        "duration_s": 16.1
+        "start_s": 3441.29,
+        "end_s": 3457.34,
+        "duration_s": 16.05
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3473.4,
-        "end_s": 3484.2,
-        "duration_s": 10.8
+        "start_s": 3457.34,
+        "end_s": 3473.35,
+        "duration_s": 16.02
       }
     },
     {
       "play_num": 113,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3484.2,
-        "end_s": 3495.1,
-        "duration_s": 10.9
+        "start_s": 3473.35,
+        "end_s": 3484.21,
+        "duration_s": 10.86
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3495.1,
-        "end_s": 3506.5,
-        "duration_s": 11.4
+        "start_s": 3484.21,
+        "end_s": 3495.07,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 114,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3506.5,
-        "end_s": 3517.3,
-        "duration_s": 10.8
+        "start_s": 3495.07,
+        "end_s": 3499.73,
+        "duration_s": 4.65
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3517.3,
-        "end_s": 3528.2,
-        "duration_s": 10.9
+        "start_s": 3499.73,
+        "end_s": 3506.47,
+        "duration_s": 6.74
       }
     },
     {
       "play_num": 115,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3528.2,
-        "end_s": 3539.6,
-        "duration_s": 11.4
+        "start_s": 3506.47,
+        "end_s": 3517.31,
+        "duration_s": 10.84
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3539.6,
-        "end_s": 3552.5,
-        "duration_s": 12.9
+        "start_s": 3517.31,
+        "end_s": 3528.17,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 116,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3552.5,
-        "end_s": 3565.4,
-        "duration_s": 12.9
+        "start_s": 3528.17,
+        "end_s": 3539.55,
+        "duration_s": 11.38
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3565.4,
-        "end_s": 3577.3,
-        "duration_s": 11.9
+        "start_s": 3539.55,
+        "end_s": 3552.5,
+        "duration_s": 12.95
       }
     },
     {
       "play_num": 117,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3577.3,
-        "end_s": 3589.7,
-        "duration_s": 12.4
+        "start_s": 3552.5,
+        "end_s": 3565.41,
+        "duration_s": 12.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3589.7,
-        "end_s": 3606.8,
-        "duration_s": 17.1
+        "start_s": 3565.41,
+        "end_s": 3577.31,
+        "duration_s": 11.9
       }
     },
     {
       "play_num": 118,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3606.8,
-        "end_s": 3623.3,
-        "duration_s": 16.5
+        "start_s": 3577.31,
+        "end_s": 3589.72,
+        "duration_s": 12.41
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3623.3,
-        "end_s": 3644.0,
-        "duration_s": 20.7
+        "start_s": 3589.72,
+        "end_s": 3606.8,
+        "duration_s": 17.08
       }
     },
     {
       "play_num": 119,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3644.0,
-        "end_s": 3678.7,
-        "duration_s": 34.7
+        "start_s": 3606.8,
+        "end_s": 3623.34,
+        "duration_s": 16.53
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3678.7,
-        "end_s": 3691.6,
-        "duration_s": 12.9
+        "start_s": 3623.34,
+        "end_s": 3644.02,
+        "duration_s": 20.69
       }
     },
     {
       "play_num": 120,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3691.6,
-        "end_s": 3702.5,
-        "duration_s": 10.9
+        "start_s": 3644.02,
+        "end_s": 3665.23,
+        "duration_s": 21.2
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3702.5,
-        "end_s": 3713.3,
-        "duration_s": 10.8
+        "start_s": 3665.23,
+        "end_s": 3678.68,
+        "duration_s": 13.45
       }
     },
     {
       "play_num": 121,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3713.3,
-        "end_s": 3726.3,
-        "duration_s": 13.0
+        "start_s": 3678.68,
+        "end_s": 3691.6,
+        "duration_s": 12.93
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3726.3,
-        "end_s": 3739.2,
-        "duration_s": 12.9
+        "start_s": 3691.6,
+        "end_s": 3702.47,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 122,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3739.2,
-        "end_s": 3754.2,
-        "duration_s": 15.0
+        "start_s": 3702.47,
+        "end_s": 3713.33,
+        "duration_s": 10.86
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3754.2,
-        "end_s": 3769.2,
-        "duration_s": 15.0
+        "start_s": 3713.33,
+        "end_s": 3726.26,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 123,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3769.2,
-        "end_s": 3790.9,
-        "duration_s": 21.7
+        "start_s": 3726.26,
+        "end_s": 3739.19,
+        "duration_s": 12.93
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3790.9,
-        "end_s": 3812.6,
-        "duration_s": 21.7
+        "start_s": 3739.19,
+        "end_s": 3754.18,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 124,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3812.6,
-        "end_s": 3827.6,
+        "start_s": 3754.18,
+        "end_s": 3769.18,
         "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3827.6,
-        "end_s": 3842.6,
-        "duration_s": 15.0
+        "start_s": 3769.18,
+        "end_s": 3790.9,
+        "duration_s": 21.72
       }
     },
     {
       "play_num": 125,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3842.6,
-        "end_s": 3855.0,
-        "duration_s": 12.4
+        "start_s": 3790.9,
+        "end_s": 3812.63,
+        "duration_s": 21.72
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3855.0,
-        "end_s": 3866.9,
-        "duration_s": 11.9
+        "start_s": 3812.63,
+        "end_s": 3827.62,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 126,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3866.9,
-        "end_s": 3885.0,
-        "duration_s": 18.1
+        "start_s": 3827.62,
+        "end_s": 3842.62,
+        "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3885.0,
-        "end_s": 3899.0,
-        "duration_s": 14.0
+        "start_s": 3842.62,
+        "end_s": 3855.03,
+        "duration_s": 12.41
       }
     },
     {
       "play_num": 127,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3899.0,
-        "end_s": 3911.9,
-        "duration_s": 12.9
+        "start_s": 3855.03,
+        "end_s": 3866.93,
+        "duration_s": 11.9
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3911.9,
-        "end_s": 3924.9,
-        "duration_s": 13.0
+        "start_s": 3866.93,
+        "end_s": 3885.03,
+        "duration_s": 18.1
       }
     },
     {
       "play_num": 128,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3924.9,
-        "end_s": 3943.0,
-        "duration_s": 18.1
+        "start_s": 3885.03,
+        "end_s": 3899.0,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3943.0,
-        "end_s": 3956.9,
-        "duration_s": 13.9
+        "start_s": 3899.0,
+        "end_s": 3911.91,
+        "duration_s": 12.91
       }
     },
     {
       "play_num": 129,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3956.9,
-        "end_s": 3968.8,
-        "duration_s": 11.9
+        "start_s": 3911.91,
+        "end_s": 3924.85,
+        "duration_s": 12.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3968.8,
-        "end_s": 3980.7,
-        "duration_s": 11.9
+        "start_s": 3924.85,
+        "end_s": 3942.96,
+        "duration_s": 18.1
       }
     },
     {
       "play_num": 130,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 3980.7,
-        "end_s": 3999.8,
-        "duration_s": 19.1
+        "start_s": 3942.96,
+        "end_s": 3956.92,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 3999.8,
-        "end_s": 4019.0,
-        "duration_s": 19.2
+        "start_s": 3956.92,
+        "end_s": 3968.81,
+        "duration_s": 11.9
       }
     },
     {
       "play_num": 131,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4019.0,
-        "end_s": 4032.9,
-        "duration_s": 13.9
+        "start_s": 3968.81,
+        "end_s": 3980.71,
+        "duration_s": 11.9
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4032.9,
-        "end_s": 4046.9,
-        "duration_s": 14.0
+        "start_s": 3980.71,
+        "end_s": 3999.85,
+        "duration_s": 19.14
       }
     },
     {
       "play_num": 132,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4046.9,
-        "end_s": 4057.8,
-        "duration_s": 10.9
+        "start_s": 3999.85,
+        "end_s": 4018.98,
+        "duration_s": 19.14
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4057.8,
-        "end_s": 4068.6,
-        "duration_s": 10.8
+        "start_s": 4018.98,
+        "end_s": 4032.95,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 133,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4068.6,
-        "end_s": 4080.5,
-        "duration_s": 11.9
+        "start_s": 4032.95,
+        "end_s": 4046.91,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4080.5,
-        "end_s": 4092.4,
-        "duration_s": 11.9
+        "start_s": 4046.91,
+        "end_s": 4057.77,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 134,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4092.4,
-        "end_s": 4104.8,
-        "duration_s": 12.4
+        "start_s": 4057.77,
+        "end_s": 4068.61,
+        "duration_s": 10.84
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4104.8,
-        "end_s": 4116.7,
-        "duration_s": 11.9
+        "start_s": 4068.61,
+        "end_s": 4080.53,
+        "duration_s": 11.91
       }
     },
     {
       "play_num": 135,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4116.7,
-        "end_s": 4130.7,
-        "duration_s": 14.0
+        "start_s": 4080.53,
+        "end_s": 4092.42,
+        "duration_s": 11.9
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4130.7,
-        "end_s": 4162.2,
-        "duration_s": 31.5
+        "start_s": 4092.42,
+        "end_s": 4104.83,
+        "duration_s": 12.41
       }
     },
     {
       "play_num": 136,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4162.2,
-        "end_s": 4180.3,
-        "duration_s": 18.1
+        "start_s": 4104.83,
+        "end_s": 4116.71,
+        "duration_s": 11.88
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4180.3,
-        "end_s": 4195.3,
-        "duration_s": 15.0
+        "start_s": 4116.71,
+        "end_s": 4130.69,
+        "duration_s": 13.98
       }
     },
     {
       "play_num": 137,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4195.3,
-        "end_s": 4210.3,
-        "duration_s": 15.0
+        "start_s": 4130.69,
+        "end_s": 4162.22,
+        "duration_s": 31.53
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4210.3,
-        "end_s": 4227.4,
-        "duration_s": 17.1
+        "start_s": 4162.22,
+        "end_s": 4180.34,
+        "duration_s": 18.12
       }
     },
     {
       "play_num": 138,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4227.4,
-        "end_s": 4244.5,
-        "duration_s": 17.1
+        "start_s": 4180.34,
+        "end_s": 4195.34,
+        "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4244.5,
-        "end_s": 4259.5,
-        "duration_s": 15.0
+        "start_s": 4195.34,
+        "end_s": 4210.32,
+        "duration_s": 14.98
       }
     },
     {
       "play_num": 139,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4259.5,
-        "end_s": 4274.5,
-        "duration_s": 15.0
+        "start_s": 4210.32,
+        "end_s": 4227.41,
+        "duration_s": 17.08
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4274.5,
-        "end_s": 4294.6,
-        "duration_s": 20.1
+        "start_s": 4227.41,
+        "end_s": 4244.47,
+        "duration_s": 17.07
       }
     },
     {
       "play_num": 140,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4294.6,
-        "end_s": 4314.8,
-        "duration_s": 20.2
+        "start_s": 4244.47,
+        "end_s": 4259.46,
+        "duration_s": 14.98
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4314.8,
-        "end_s": 4329.8,
+        "start_s": 4259.46,
+        "end_s": 4274.45,
         "duration_s": 15.0
       }
     },
@@ -2107,294 +2107,324 @@
       "play_num": 141,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4329.8,
-        "end_s": 4344.8,
-        "duration_s": 15.0
+        "start_s": 4274.45,
+        "end_s": 4294.64,
+        "duration_s": 20.19
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4344.8,
-        "end_s": 4370.1,
-        "duration_s": 25.3
+        "start_s": 4294.64,
+        "end_s": 4314.79,
+        "duration_s": 20.15
       }
     },
     {
       "play_num": 142,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4370.1,
-        "end_s": 4395.5,
-        "duration_s": 25.4
+        "start_s": 4314.79,
+        "end_s": 4329.79,
+        "duration_s": 15.0
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4395.5,
-        "end_s": 4408.9,
-        "duration_s": 13.4
+        "start_s": 4329.79,
+        "end_s": 4344.81,
+        "duration_s": 15.02
       }
     },
     {
       "play_num": 143,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4408.9,
-        "end_s": 4421.9,
-        "duration_s": 13.0
+        "start_s": 4344.81,
+        "end_s": 4370.13,
+        "duration_s": 25.33
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4421.9,
-        "end_s": 4436.3,
-        "duration_s": 14.4
+        "start_s": 4370.13,
+        "end_s": 4395.49,
+        "duration_s": 25.36
       }
     },
     {
       "play_num": 144,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4436.3,
-        "end_s": 4450.3,
-        "duration_s": 14.0
+        "start_s": 4395.49,
+        "end_s": 4408.92,
+        "duration_s": 13.43
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4450.3,
-        "end_s": 4468.4,
-        "duration_s": 18.1
+        "start_s": 4408.92,
+        "end_s": 4421.85,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 145,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4468.4,
-        "end_s": 4486.5,
-        "duration_s": 18.1
+        "start_s": 4421.85,
+        "end_s": 4433.25,
+        "duration_s": 11.39
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4486.5,
-        "end_s": 4499.4,
-        "duration_s": 12.9
+        "start_s": 4433.25,
+        "end_s": 4436.35,
+        "duration_s": 3.1
       }
     },
     {
       "play_num": 146,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4499.4,
-        "end_s": 4512.4,
-        "duration_s": 13.0
+        "start_s": 4436.35,
+        "end_s": 4450.31,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4512.4,
-        "end_s": 4527.4,
-        "duration_s": 15.0
+        "start_s": 4450.31,
+        "end_s": 4468.4,
+        "duration_s": 18.08
       }
     },
     {
       "play_num": 147,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4527.4,
-        "end_s": 4542.4,
-        "duration_s": 15.0
+        "start_s": 4468.4,
+        "end_s": 4486.52,
+        "duration_s": 18.12
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4542.4,
-        "end_s": 4558.4,
-        "duration_s": 16.0
+        "start_s": 4486.52,
+        "end_s": 4499.44,
+        "duration_s": 12.93
       }
     },
     {
       "play_num": 148,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4558.4,
-        "end_s": 4574.4,
-        "duration_s": 16.0
+        "start_s": 4499.44,
+        "end_s": 4527.36,
+        "duration_s": 27.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4574.4,
-        "end_s": 4590.5,
-        "duration_s": 16.1
+        "start_s": 4527.36,
+        "end_s": 4542.37,
+        "duration_s": 15.02
       }
     },
     {
       "play_num": 149,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4590.5,
-        "end_s": 4606.5,
-        "duration_s": 16.0
+        "start_s": 4542.37,
+        "end_s": 4558.39,
+        "duration_s": 16.02
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4606.5,
-        "end_s": 4621.5,
-        "duration_s": 15.0
+        "start_s": 4558.39,
+        "end_s": 4574.42,
+        "duration_s": 16.03
       }
     },
     {
       "play_num": 150,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4621.5,
-        "end_s": 4636.4,
-        "duration_s": 14.9
+        "start_s": 4574.42,
+        "end_s": 4590.47,
+        "duration_s": 16.05
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4636.4,
-        "end_s": 4647.4,
-        "duration_s": 11.0
+        "start_s": 4590.47,
+        "end_s": 4606.5,
+        "duration_s": 16.03
       }
     },
     {
       "play_num": 151,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4647.4,
-        "end_s": 4658.2,
-        "duration_s": 10.8
+        "start_s": 4606.5,
+        "end_s": 4621.48,
+        "duration_s": 14.98
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4658.2,
-        "end_s": 4672.2,
-        "duration_s": 14.0
+        "start_s": 4621.48,
+        "end_s": 4636.48,
+        "duration_s": 15.0
       }
     },
     {
       "play_num": 152,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4672.2,
-        "end_s": 4686.1,
-        "duration_s": 13.9
+        "start_s": 4636.48,
+        "end_s": 4647.36,
+        "duration_s": 10.88
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4686.1,
-        "end_s": 4700.1,
-        "duration_s": 14.0
+        "start_s": 4647.36,
+        "end_s": 4658.2,
+        "duration_s": 10.84
       }
     },
     {
       "play_num": 153,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4700.1,
-        "end_s": 4714.1,
-        "duration_s": 14.0
+        "start_s": 4658.2,
+        "end_s": 4672.17,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4714.1,
-        "end_s": 4724.9,
-        "duration_s": 10.8
+        "start_s": 4672.17,
+        "end_s": 4686.13,
+        "duration_s": 13.96
       }
     },
     {
       "play_num": 154,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4724.9,
-        "end_s": 4735.8,
-        "duration_s": 10.9
+        "start_s": 4686.13,
+        "end_s": 4700.11,
+        "duration_s": 13.98
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4735.8,
-        "end_s": 4747.7,
-        "duration_s": 11.9
+        "start_s": 4700.11,
+        "end_s": 4714.06,
+        "duration_s": 13.95
       }
     },
     {
       "play_num": 155,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4747.7,
-        "end_s": 4760.1,
-        "duration_s": 12.4
+        "start_s": 4714.06,
+        "end_s": 4724.92,
+        "duration_s": 10.86
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4760.1,
-        "end_s": 4774.1,
-        "duration_s": 14.0
+        "start_s": 4724.92,
+        "end_s": 4735.78,
+        "duration_s": 10.86
       }
     },
     {
       "play_num": 156,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4774.1,
-        "end_s": 4788.5,
-        "duration_s": 14.4
+        "start_s": 4735.78,
+        "end_s": 4747.69,
+        "duration_s": 11.91
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4788.5,
-        "end_s": 4811.8,
-        "duration_s": 23.3
+        "start_s": 4747.69,
+        "end_s": 4760.09,
+        "duration_s": 12.4
       }
     },
     {
       "play_num": 157,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4811.8,
-        "end_s": 4835.1,
-        "duration_s": 23.3
+        "start_s": 4760.09,
+        "end_s": 4774.05,
+        "duration_s": 13.96
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4835.1,
-        "end_s": 4847.0,
-        "duration_s": 11.9
+        "start_s": 4774.05,
+        "end_s": 4788.53,
+        "duration_s": 14.48
       }
     },
     {
       "play_num": 158,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4847.0,
-        "end_s": 4858.9,
-        "duration_s": 11.9
+        "start_s": 4788.53,
+        "end_s": 4806.35,
+        "duration_s": 17.82
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4858.9,
-        "end_s": 4874.9,
-        "duration_s": 16.0
+        "start_s": 4806.35,
+        "end_s": 4811.81,
+        "duration_s": 5.46
       }
     },
     {
       "play_num": 159,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4874.9,
-        "end_s": 4890.9,
-        "duration_s": 16.0
+        "start_s": 4811.81,
+        "end_s": 4835.08,
+        "duration_s": 23.27
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 4890.9,
-        "end_s": 4907.0,
-        "duration_s": 16.1
+        "start_s": 4835.08,
+        "end_s": 4846.98,
+        "duration_s": 11.9
       }
     },
     {
       "play_num": 160,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 4907.0,
+        "start_s": 4846.98,
+        "end_s": 4858.87,
+        "duration_s": 11.9
+      },
+      "endzone": {
+        "file": "endzone.mp4",
+        "start_s": 4858.87,
+        "end_s": 4874.9,
+        "duration_s": 16.03
+      }
+    },
+    {
+      "play_num": 161,
+      "sideline": {
+        "file": "sideline.mp4",
+        "start_s": 4874.9,
+        "end_s": 4890.94,
+        "duration_s": 16.03
+      },
+      "endzone": {
+        "file": "endzone.mp4",
+        "start_s": 4890.94,
+        "end_s": 4906.97,
+        "duration_s": 16.03
+      }
+    },
+    {
+      "play_num": 162,
+      "sideline": {
+        "file": "sideline.mp4",
+        "start_s": 4906.97,
         "end_s": 4923.0,
-        "duration_s": 16.0
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
@@ -2404,7 +2434,7 @@
       }
     },
     {
-      "play_num": 161,
+      "play_num": 163,
       "sideline": {
         "file": "sideline.mp4",
         "start_s": 4941.1,
@@ -2414,67 +2444,67 @@
       "endzone": {
         "file": "endzone.mp4",
         "start_s": 4959.2,
-        "end_s": 4975.2,
-        "duration_s": 16.0
-      }
-    },
-    {
-      "play_num": 162,
-      "sideline": {
-        "file": "sideline.mp4",
-        "start_s": 4975.2,
-        "end_s": 4991.3,
-        "duration_s": 16.1
-      },
-      "endzone": {
-        "file": "endzone.mp4",
-        "start_s": 4991.3,
-        "end_s": 5005.3,
-        "duration_s": 14.0
-      }
-    },
-    {
-      "play_num": 163,
-      "sideline": {
-        "file": "sideline.mp4",
-        "start_s": 5005.3,
-        "end_s": 5019.2,
-        "duration_s": 13.9
-      },
-      "endzone": {
-        "file": "endzone.mp4",
-        "start_s": 5019.2,
-        "end_s": 5035.2,
-        "duration_s": 16.0
+        "end_s": 4975.24,
+        "duration_s": 16.03
       }
     },
     {
       "play_num": 164,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 5035.2,
-        "end_s": 5051.3,
-        "duration_s": 16.1
+        "start_s": 4975.24,
+        "end_s": 4991.27,
+        "duration_s": 16.03
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 5051.3,
-        "end_s": 5067.3,
-        "duration_s": 16.0
+        "start_s": 4991.27,
+        "end_s": 5005.25,
+        "duration_s": 13.98
       }
     },
     {
       "play_num": 165,
       "sideline": {
         "file": "sideline.mp4",
-        "start_s": 5067.3,
-        "end_s": 5083.3,
-        "duration_s": 16.0
+        "start_s": 5005.25,
+        "end_s": 5019.2,
+        "duration_s": 13.95
       },
       "endzone": {
         "file": "endzone.mp4",
-        "start_s": 5083.3,
-        "end_s": 5095.2,
+        "start_s": 5019.2,
+        "end_s": 5035.23,
+        "duration_s": 16.03
+      }
+    },
+    {
+      "play_num": 166,
+      "sideline": {
+        "file": "sideline.mp4",
+        "start_s": 5035.23,
+        "end_s": 5051.26,
+        "duration_s": 16.03
+      },
+      "endzone": {
+        "file": "endzone.mp4",
+        "start_s": 5051.26,
+        "end_s": 5067.3,
+        "duration_s": 16.03
+      }
+    },
+    {
+      "play_num": 167,
+      "sideline": {
+        "file": "sideline.mp4",
+        "start_s": 5067.3,
+        "end_s": 5083.33,
+        "duration_s": 16.03
+      },
+      "endzone": {
+        "file": "endzone.mp4",
+        "start_s": 5083.33,
+        "end_s": 5095.22,
         "duration_s": 11.9
       }
     }

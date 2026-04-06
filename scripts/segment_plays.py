@@ -6,7 +6,7 @@ Each play in All-22 film follows the pattern:
   [scoreboard] → sideline wide → endzone tight → [scoreboard] → ...
 
 Detection:
-  1. Find all hard cuts via local-ratio spike detection on frame diffs.
+  1. Find all hard cuts via ffmpeg's scdet filter (MPEG MAFD scene detection).
   2. Classify each segment between cuts as "field" or "non-field" (scoreboard)
      using HSV green percentage.
   3. Group consecutive field segments into plays: the first field segment
@@ -15,15 +15,17 @@ Detection:
      play starts each time EZ→SL occurs.
 
 Usage:
-  python scripts/segment_plays.py --video <path> --game-id <id> [--output data/clips/]
+  python scripts/segment_plays.py --video <path> --game-id <id> [--output videos/clips/]
   python scripts/segment_plays.py --video <path> --game-id <id> --preview
 """
 
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 import cv2
@@ -32,12 +34,13 @@ import numpy as np
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
-CUT_RATIO_THRESHOLD = 4.0    # frame diff must be >= this × local median
-CUT_MIN_DIFF = 15.0           # absolute minimum diff for a cut
-CUT_NEIGHBOR_WINDOW = 15      # frames on each side for local median (~0.5s)
+SCDET_THRESHOLD = 5.0         # ffmpeg scdet score threshold (5.0 works for All-22)
 CUT_MIN_GAP_S = 0.3           # minimum seconds between detected cuts
 GREEN_FIELD_THRESHOLD = 0.20  # min green % to classify segment as field
 MIN_SEGMENT_DURATION_S = 1.0  # ignore segments shorter than this
+
+BOUNDARY_TRIM_S = 0.5         # trim off each clip boundary
+SIDELINE_END_TRIM_S = 1.0     # extra trim off end of sideline clips (camera transition)
 
 
 # ── Data structures ────────────────────────────────────────────────────────
@@ -64,63 +67,51 @@ class PlayClip:
 
 # ── Hard cut detection ─────────────────────────────────────────────────────
 
-def detect_cuts(video_path: str) -> list[float]:
-    """Detect hard cuts by finding frames where diff spikes relative to neighbors."""
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"ERROR: Cannot open {video_path}")
-        sys.exit(1)
+def get_video_info(video_path: str) -> tuple[float, float]:
+    """Get video duration and fps using ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "format=duration",
+        "-show_entries", "stream=r_frame_rate",
+        "-of", "json", video_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    info = json.loads(result.stdout)
+    duration_s = float(info["format"]["duration"])
+    # Parse frame rate fraction (e.g. "60000/1001")
+    fps_str = info["streams"][0]["r_frame_rate"]
+    num, den = fps_str.split("/")
+    fps = float(num) / float(den)
+    return duration_s, fps
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration_s = total_frames / fps
-    print(f"Video: {duration_s:.0f}s ({duration_s/60:.1f} min), {fps:.2f} fps")
-    print(f"Scanning {total_frames} frames for hard cuts...")
 
-    prev_gray = None
-    diffs = []
+def detect_cuts(video_path: str, threshold: float = SCDET_THRESHOLD) -> list[float]:
+    """Detect hard cuts using ffmpeg's scdet filter (MPEG MAFD scene detection).
 
-    frame_num = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        gray = cv2.cvtColor(
-            cv2.resize(frame, (320, 180)), cv2.COLOR_BGR2GRAY
-        ).astype(np.float32)
-        if prev_gray is not None:
-            diff = float(np.mean(np.abs(gray - prev_gray)))
-            diffs.append(diff)
-        prev_gray = gray
-        frame_num += 1
+    This is robust to camera pans because MAFD distinguishes inter-frame
+    motion from actual scene changes. Runs at 20-40x realtime.
+    """
+    cmd = [
+        "ffmpeg", "-i", video_path,
+        "-vf", f"scdet=t={threshold}:sc_pass=1",
+        "-f", "null", "-",
+    ]
+    print("  Running ffmpeg scene detection...")
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
-        if frame_num % (int(fps) * 300) == 0:
-            pct = frame_num / total_frames * 100
-            print(f"  {pct:.0f}% ({frame_num/fps:.0f}s / {duration_s:.0f}s)")
+    # Parse cut timestamps from stderr
+    pattern = re.compile(r"lavfi\.scd\.time:\s*([\d.]+)")
+    raw_cuts = [float(m.group(1)) for m in pattern.finditer(result.stderr)]
 
-    cap.release()
-    diffs_arr = np.array(diffs)
+    # Apply minimum gap filter
+    cuts = []
+    for t in raw_cuts:
+        if not cuts or t - cuts[-1] > CUT_MIN_GAP_S:
+            cuts.append(t)
 
-    # Find local-ratio spikes
-    w = CUT_NEIGHBOR_WINDOW
-    cut_frames = []
-
-    for i in range(w, len(diffs_arr) - w):
-        if diffs_arr[i] < CUT_MIN_DIFF:
-            continue
-        neighborhood = np.concatenate([diffs_arr[i - w : i], diffs_arr[i + 1 : i + w + 1]])
-        local_median = np.median(neighborhood)
-        if local_median <= 0:
-            continue
-        ratio = diffs_arr[i] / local_median
-        if ratio >= CUT_RATIO_THRESHOLD:
-            # Check minimum gap from previous cut
-            t = (i + 1) / fps
-            if not cut_frames or t - cut_frames[-1] > CUT_MIN_GAP_S:
-                cut_frames.append(t)
-
-    print(f"  Found {len(cut_frames)} hard cuts")
-    return cut_frames
+    print(f"  Found {len(cuts)} hard cuts")
+    return cuts
 
 
 # ── Segment classification ─────────────────────────────────────────────────
@@ -235,30 +226,40 @@ def group_plays(segments: list[Segment]) -> list[PlayClip]:
 
 # ── Clip extraction ────────────────────────────────────────────────────────
 
-TRIM_INWARD_S = 0.4  # shave off boundary frames to avoid bleed
+def extract_clip(video_path: str, start_s: float, duration_s: float,
+                 output_path: str, reencode: bool = False) -> None:
+    """Extract a clip using stream copy (fast) or re-encode (precise).
 
-
-def extract_clip(video_path: str, start_s: float, end_s: float, output_path: str) -> None:
-    """Extract a clip using re-encode for frame-accurate cuts, with inward trim."""
-    start_s = start_s + TRIM_INWARD_S
-    end_s = end_s - TRIM_INWARD_S
-    duration = end_s - start_s
-    if duration <= 0:
+    Stream copy works because YouTube places keyframes at scene changes,
+    so cut boundaries align with I-frames.
+    """
+    if duration_s <= 0:
         return
-    cmd = [
-        "ffmpeg", "-y",
-        "-ss", f"{start_s:.3f}",
-        "-i", video_path,
-        "-t", f"{duration:.3f}",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-an",
-        output_path,
-    ]
+
+    if reencode:
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{start_s:.3f}",
+            "-i", video_path,
+            "-t", f"{duration_s:.3f}",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            "-an", output_path,
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{start_s:.3f}",
+            "-i", video_path,
+            "-t", f"{duration_s:.3f}",
+            "-c", "copy", "-an",
+            output_path,
+        ]
     subprocess.run(cmd, capture_output=True, check=True)
 
 
 def extract_plays(
-    video_path: str, plays: list[PlayClip], output_dir: str, game_id: str
+    video_path: str, plays: list[PlayClip], output_dir: str, game_id: str,
+    workers: int = 4, reencode: bool = False,
 ) -> dict:
     """Extract all play clips and write manifest."""
     game_dir = os.path.join(output_dir, game_id)
@@ -271,6 +272,8 @@ def extract_plays(
         "plays": [],
     }
 
+    # Build task list with trimmed boundaries
+    tasks = []
     for play in plays:
         play_dir = os.path.join(game_dir, f"play_{play.play_num:03d}")
         os.makedirs(play_dir, exist_ok=True)
@@ -278,17 +281,26 @@ def extract_plays(
         sl_dur = play.sideline_end - play.sideline_start
         ez_dur = play.endzone_end - play.endzone_start
 
-        print(
-            f"  Play {play.play_num:3d}: "
-            f"SL {play.sideline_start:.1f}-{play.sideline_end:.1f}s ({sl_dur:.1f}s), "
-            f"EZ {play.endzone_start:.1f}-{play.endzone_end:.1f}s ({ez_dur:.1f}s)"
-        )
+        # Sideline: trim start + trim end + extra camera transition trim
+        sl_start = play.sideline_start + BOUNDARY_TRIM_S
+        sl_duration = sl_dur - BOUNDARY_TRIM_S - BOUNDARY_TRIM_S - SIDELINE_END_TRIM_S
+
+        # Endzone: trim start + trim end
+        ez_start = play.endzone_start + BOUNDARY_TRIM_S
+        ez_duration = ez_dur - BOUNDARY_TRIM_S - BOUNDARY_TRIM_S
 
         sideline_path = os.path.join(play_dir, "sideline.mp4")
         endzone_path = os.path.join(play_dir, "endzone.mp4")
 
-        extract_clip(video_path, play.sideline_start, play.sideline_end, sideline_path)
-        extract_clip(video_path, play.endzone_start, play.endzone_end, endzone_path)
+        if sl_duration > 1.0:
+            tasks.append((video_path, sl_start, sl_duration, sideline_path, reencode))
+        else:
+            print(f"  Warning: play {play.play_num} sideline too short ({sl_dur:.1f}s), skipping")
+
+        if ez_duration > 1.0:
+            tasks.append((video_path, ez_start, ez_duration, endzone_path, reencode))
+        else:
+            print(f"  Warning: play {play.play_num} endzone too short ({ez_dur:.1f}s), skipping")
 
         manifest["plays"].append({
             "play_num": play.play_num,
@@ -305,6 +317,29 @@ def extract_plays(
                 "duration_s": round(ez_dur, 2),
             },
         })
+
+    # Extract clips in parallel
+    print(f"\n  Extracting {len(tasks)} clips ({workers} workers, "
+          f"{'re-encode' if reencode else 'stream copy'})...")
+    completed = 0
+    errors = 0
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(extract_clip, *t): t for t in tasks}
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                errors += 1
+                task = futures[future]
+                print(f"  Error extracting {task[3]}: {e}")
+            completed += 1
+            if completed % 50 == 0:
+                print(f"  {completed}/{len(tasks)} clips extracted...")
+
+    print(f"  {completed - errors}/{len(tasks)} clips extracted successfully")
+    if errors:
+        print(f"  {errors} errors")
 
     manifest_path = os.path.join(game_dir, "manifest.json")
     with open(manifest_path, "w") as f:
@@ -376,6 +411,18 @@ def main():
         "--preview", action="store_true",
         help="Generate timeline visualization only, no clip extraction",
     )
+    parser.add_argument(
+        "--scdet-threshold", type=float, default=SCDET_THRESHOLD,
+        help=f"Scene detection threshold (default: {SCDET_THRESHOLD})",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=4,
+        help="Parallel ffmpeg workers for extraction (default: 4)",
+    )
+    parser.add_argument(
+        "--reencode", action="store_true",
+        help="Use re-encode instead of stream copy (slower but frame-precise)",
+    )
     args = parser.parse_args()
 
     video_path = os.path.abspath(args.video)
@@ -386,14 +433,10 @@ def main():
     print(f"Processing: {os.path.basename(video_path)}")
     print(f"Game ID:    {args.game_id}\n")
 
-    # Step 1: Detect hard cuts
-    cuts = detect_cuts(video_path)
-
-    # Get video duration
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    duration_s = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps
-    cap.release()
+    # Step 1: Get video info and detect hard cuts
+    duration_s, fps = get_video_info(video_path)
+    print(f"Video: {duration_s:.0f}s ({duration_s/60:.1f} min), {fps:.2f} fps")
+    cuts = detect_cuts(video_path, threshold=args.scdet_threshold)
 
     # Step 2: Classify segments between cuts
     print("\nClassifying segments...")
@@ -422,7 +465,8 @@ def main():
 
     # Step 4: Extract clips
     print(f"\nExtracting clips to {args.output}...")
-    extract_plays(video_path, plays, args.output, args.game_id)
+    extract_plays(video_path, plays, args.output, args.game_id,
+                  workers=args.workers, reencode=args.reencode)
     print(f"\nDone! {len(plays)} plays → {os.path.join(args.output, args.game_id)}/")
 
 
