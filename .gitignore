@@ -8,8 +8,9 @@ __pycache__/
 data/
 videos/
 *.mp4
-# But track the clips directory structure (not the clips themselves)
+# But track the directory structure (not the video/clip files themselves)
 !videos/
+!videos/games/
 !videos/clips/
 
 # Model weights (large binary files)
