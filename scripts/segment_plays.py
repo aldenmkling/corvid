@@ -5,14 +5,11 @@ Segment an All-22 game video into per-play clips (sideline + endzone).
 Each play in All-22 film follows the pattern:
   [scoreboard] → sideline wide → endzone tight → [scoreboard] → ...
 
-Detection:
-  1. Find all hard cuts via ffmpeg's scdet filter (MPEG MAFD scene detection).
-  2. Classify each segment between cuts as "field" or "non-field" (scoreboard)
-     using HSV green percentage.
-  3. Group consecutive field segments into plays: the first field segment
-     after a non-field (or start) is sideline, the next is endzone.
-  4. If no scoreboards exist, field segments alternate SL/EZ, and a new
-     play starts each time EZ→SL occurs.
+Detection uses a YOLO-cls view classifier trained on 2019 game frames:
+  1. Classify 1 frame/second as sideline, endzone, or scoreboard.
+  2. Find transitions where the confident label changes.
+  3. Group consecutive sideline+endzone segments into plays.
+  4. Extract clips using ffmpeg stream copy with boundary trims.
 
 Usage:
   python scripts/segment_plays.py --video <path> --game-id <id> [--output videos/clips/]
@@ -22,9 +19,9 @@ Usage:
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
@@ -34,13 +31,13 @@ import numpy as np
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
-SCDET_THRESHOLD = 5.0         # ffmpeg scdet score threshold (5.0 works for All-22)
-CUT_MIN_GAP_S = 0.3           # minimum seconds between detected cuts
-GREEN_FIELD_THRESHOLD = 0.20  # min green % to classify segment as field
-MIN_SEGMENT_DURATION_S = 1.0  # ignore segments shorter than this
+VIEW_MODEL_PATH = "models/view_classifier.pt"
+CONFIDENCE_THRESHOLD = 0.7    # below this, carry forward previous label
+SMOOTHING_WINDOW = 3          # majority vote window (frames at 1fps = seconds)
+MIN_SEGMENT_DURATION_S = 3.0  # merge segments shorter than this into neighbor
 
-BOUNDARY_TRIM_S = 0.5         # trim off each clip boundary
-SIDELINE_END_TRIM_S = 1.0     # extra trim off end of sideline clips (camera transition)
+START_TRIM_S = 1.0            # trim off start of all clips
+END_TRIM_S = 2.0              # trim off end of all clips
 
 
 # ── Data structures ────────────────────────────────────────────────────────
@@ -49,7 +46,7 @@ SIDELINE_END_TRIM_S = 1.0     # extra trim off end of sideline clips (camera tra
 class Segment:
     start_s: float
     end_s: float
-    is_field: bool
+    view_type: str  # "sideline", "endzone", or "scoreboard"
 
     @property
     def duration(self) -> float:
@@ -65,153 +62,144 @@ class PlayClip:
     endzone_end: float
 
 
-# ── Hard cut detection ─────────────────────────────────────────────────────
+# ── View classification ───────────────────────────────────────────────────
 
-def get_video_info(video_path: str) -> tuple[float, float]:
-    """Get video duration and fps using ffprobe."""
-    cmd = [
-        "ffprobe", "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "format=duration",
-        "-show_entries", "stream=r_frame_rate",
-        "-of", "json", video_path,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    info = json.loads(result.stdout)
-    duration_s = float(info["format"]["duration"])
-    # Parse frame rate fraction (e.g. "60000/1001")
-    fps_str = info["streams"][0]["r_frame_rate"]
-    num, den = fps_str.split("/")
-    fps = float(num) / float(den)
-    return duration_s, fps
+def classify_frames(video_path: str, model_path: str) -> list[tuple[int, str, float]]:
+    """Classify 1 frame/second using YOLO-cls view classifier.
 
-
-def detect_cuts(video_path: str, threshold: float = SCDET_THRESHOLD) -> list[float]:
-    """Detect hard cuts using ffmpeg's scdet filter (MPEG MAFD scene detection).
-
-    This is robust to camera pans because MAFD distinguishes inter-frame
-    motion from actual scene changes. Runs at 20-40x realtime.
+    Reads sequentially and skips frames for speed (avoids slow seeking).
+    Returns list of (second, class_name, confidence).
     """
-    cmd = [
-        "ffmpeg", "-i", video_path,
-        "-vf", f"scdet=t={threshold}:sc_pass=1",
-        "-f", "null", "-",
-    ]
-    print("  Running ffmpeg scene detection...")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    from ultralytics import YOLO
+    model = YOLO(model_path)
 
-    # Parse cut timestamps from stderr
-    pattern = re.compile(r"lavfi\.scd\.time:\s*([\d.]+)")
-    raw_cuts = [float(m.group(1)) for m in pattern.finditer(result.stderr)]
-
-    # Apply minimum gap filter
-    cuts = []
-    for t in raw_cuts:
-        if not cuts or t - cuts[-1] > CUT_MIN_GAP_S:
-            cuts.append(t)
-
-    print(f"  Found {len(cuts)} hard cuts")
-    return cuts
-
-
-# ── Segment classification ─────────────────────────────────────────────────
-
-def classify_segments(
-    video_path: str, cuts: list[float], duration_s: float
-) -> list[Segment]:
-    """Classify each segment between cuts as field or non-field."""
     cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"ERROR: Cannot open {video_path}")
+        sys.exit(1)
 
-    # Build segment boundaries: [0, cut1, cut2, ..., end]
-    boundaries = [0.0] + cuts + [duration_s]
-    segments = []
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration_s = total_frames / fps
+    step = round(fps)  # 1 frame per second
 
-    for i in range(len(boundaries) - 1):
-        start = boundaries[i]
-        end = boundaries[i + 1]
-        dur = end - start
+    print(f"Video: {duration_s:.0f}s ({duration_s/60:.1f} min), {fps:.2f} fps")
+    print(f"Classifying 1 frame/second ({int(duration_s)} frames)...")
 
-        if dur < MIN_SEGMENT_DURATION_S:
-            # Too short — classify based on neighbors later
-            segments.append(Segment(start, end, is_field=False))
-            continue
+    classifications = []
+    frame_num = 0
 
-        # Sample the middle of the segment
-        mid = (start + end) / 2
-        cap.set(cv2.CAP_PROP_POS_MSEC, mid * 1000)
+    while True:
         ret, frame = cap.read()
         if not ret:
-            segments.append(Segment(start, end, is_field=False))
-            continue
+            break
 
-        # HSV green percentage on center crop
-        h, w = frame.shape[:2]
-        center = frame[h // 4 : 3 * h // 4, w // 5 : 4 * w // 5]
-        hsv = cv2.cvtColor(center, cv2.COLOR_BGR2HSV)
-        green_mask = cv2.inRange(hsv, (35, 30, 40), (85, 255, 255))
-        green_pct = float(np.mean(green_mask > 0))
+        if frame_num % step == 0:
+            sec = round(frame_num / fps)
+            small = cv2.resize(frame, (224, 224), interpolation=cv2.INTER_AREA)
+            result = model(small, verbose=False)[0]
+            pred = result.names[result.probs.top1]
+            conf = float(result.probs.top1conf)
+            classifications.append((sec, pred, conf))
 
-        segments.append(Segment(start, end, is_field=green_pct > GREEN_FIELD_THRESHOLD))
+            if sec % 500 == 0 and sec > 0:
+                print(f"  {sec}/{int(duration_s)}s...")
+
+        frame_num += 1
 
     cap.release()
+    print(f"  Classified {len(classifications)} frames")
+    return classifications
+
+
+# ── Segment detection ─────────────────────────────────────────────────────
+
+def find_segments(classifications: list[tuple[int, str, float]],
+                  duration_s: float) -> list[Segment]:
+    """Find view segments by detecting transitions in confident classifications.
+
+    Low-confidence frames carry forward the previous label.
+    Majority-vote smoothing prevents single-frame glitches from triggering cuts.
+    Short segments are merged into neighbors.
+    """
+    if not classifications:
+        return []
+
+    # Step 1: Confidence gating — low-confidence frames inherit previous label
+    gated = []
+    prev_label = classifications[0][1]
+    for sec, pred, conf in classifications:
+        if conf >= CONFIDENCE_THRESHOLD:
+            prev_label = pred
+        gated.append(prev_label)
+
+    # Step 2: Majority-vote smoothing over SMOOTHING_WINDOW frames
+    W = SMOOTHING_WINDOW
+    smoothed_labels = []
+    for i in range(len(gated)):
+        window = gated[max(0, i - W // 2):i + W // 2 + 1]
+        most_common = Counter(window).most_common(1)[0][0]
+        smoothed_labels.append(most_common)
+
+    labels = [(classifications[i][0], smoothed_labels[i]) for i in range(len(classifications))]
+
+    # Step 3: Find runs of same label → segments
+    segments = []
+    run_start = labels[0][0]
+    run_label = labels[0][1]
+
+    for i in range(1, len(labels)):
+        sec, label = labels[i]
+        if label != run_label:
+            # End of run
+            segments.append(Segment(
+                start_s=float(run_start),
+                end_s=float(sec),
+                view_type=run_label,
+            ))
+            run_start = sec
+            run_label = label
+
+    # Final segment
+    segments.append(Segment(
+        start_s=float(run_start),
+        end_s=duration_s,
+        view_type=run_label,
+    ))
+
+    # Filter short segments
+    segments = [s for s in segments if s.duration >= MIN_SEGMENT_DURATION_S]
+
     return segments
 
 
 # ── Play grouping ──────────────────────────────────────────────────────────
 
 def group_plays(segments: list[Segment]) -> list[PlayClip]:
+    """Group segments into plays.
+
+    Each play = consecutive sideline + endzone pair.
+    Scoreboard segments are skipped (play separators).
     """
-    Group segments into plays.
+    field_segments = [s for s in segments if s.view_type in ("sideline", "endzone")]
+    scoreboard_segments = [s for s in segments if s.view_type == "scoreboard"]
 
-    With scoreboards: non-field segments are play separators.
-    Each play = 2 consecutive field segments (sideline then endzone).
+    print(f"  {len(field_segments)} field segments "
+          f"({sum(1 for s in field_segments if s.view_type == 'sideline')} SL, "
+          f"{sum(1 for s in field_segments if s.view_type == 'endzone')} EZ)")
+    if scoreboard_segments:
+        print(f"  {len(scoreboard_segments)} scoreboard segments")
 
-    Without scoreboards: field segments alternate SL/EZ.
-    A new play starts at each pair.
-    """
-    field_segments = [s for s in segments if s.is_field and s.duration >= MIN_SEGMENT_DURATION_S]
-    non_field_segments = [s for s in segments if not s.is_field and s.duration >= MIN_SEGMENT_DURATION_S]
+    plays = []
+    play_num = 1
+    i = 0
 
-    has_scoreboards = len(non_field_segments) > 0
-    print(f"  {len(field_segments)} field segments, {len(non_field_segments)} non-field segments")
-    print(f"  Scoreboard clips: {'yes' if has_scoreboards else 'no'}")
+    while i < len(field_segments) - 1:
+        sl = field_segments[i]
+        ez = field_segments[i + 1]
 
-    if has_scoreboards:
-        # Group field segments between non-field separators
-        # Each group of 2 consecutive field segments = 1 play (SL + EZ)
-        plays = []
-        i = 0
-        play_num = 1
-        while i < len(field_segments) - 1:
-            sl = field_segments[i]
-            ez = field_segments[i + 1]
-
-            # Verify they're from the same play: EZ should start right after SL
-            # (no non-field segment between them)
-            gap = ez.start_s - sl.end_s
-            if gap < 1.0:
-                # These are paired: SL then EZ within the same play
-                plays.append(PlayClip(
-                    play_num=play_num,
-                    sideline_start=sl.start_s,
-                    sideline_end=sl.end_s,
-                    endzone_start=ez.start_s,
-                    endzone_end=ez.end_s,
-                ))
-                play_num += 1
-                i += 2
-            else:
-                # There's a gap (scoreboard) between them — sl is orphaned
-                # This can happen if the SL→EZ cut wasn't detected
-                print(f"  Warning: orphan field segment at {sl.start_s:.1f}-{sl.end_s:.1f}s, skipping")
-                i += 1
-    else:
-        # No scoreboards — field segments alternate SL/EZ
-        plays = []
-        play_num = 1
-        for i in range(0, len(field_segments) - 1, 2):
-            sl = field_segments[i]
-            ez = field_segments[i + 1]
+        if sl.view_type == "sideline" and ez.view_type == "endzone":
+            # Valid SL→EZ pair
             plays.append(PlayClip(
                 play_num=play_num,
                 sideline_start=sl.start_s,
@@ -220,6 +208,25 @@ def group_plays(segments: list[Segment]) -> list[PlayClip]:
                 endzone_end=ez.end_s,
             ))
             play_num += 1
+            i += 2
+        else:
+            # Orphan segment (e.g. two sidelines in a row) — skip it
+            print(f"  Warning: orphan {sl.view_type} segment at "
+                  f"{sl.start_s:.1f}-{sl.end_s:.1f}s, skipping")
+            i += 1
+
+    # Handle last segment if unpaired
+    if i == len(field_segments) - 1:
+        last = field_segments[i]
+        if last.view_type == "sideline":
+            # Final play with sideline only (end of game)
+            plays.append(PlayClip(
+                play_num=play_num,
+                sideline_start=last.start_s,
+                sideline_end=last.end_s,
+                endzone_start=0,
+                endzone_end=0,
+            ))
 
     return plays
 
@@ -227,39 +234,24 @@ def group_plays(segments: list[Segment]) -> list[PlayClip]:
 # ── Clip extraction ────────────────────────────────────────────────────────
 
 def extract_clip(video_path: str, start_s: float, duration_s: float,
-                 output_path: str, reencode: bool = False) -> None:
-    """Extract a clip using stream copy (fast) or re-encode (precise).
-
-    Stream copy works because YouTube places keyframes at scene changes,
-    so cut boundaries align with I-frames.
-    """
+                 output_path: str) -> None:
+    """Extract a clip using stream copy."""
     if duration_s <= 0:
         return
-
-    if reencode:
-        cmd = [
-            "ffmpeg", "-y",
-            "-ss", f"{start_s:.3f}",
-            "-i", video_path,
-            "-t", f"{duration_s:.3f}",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-            "-an", output_path,
-        ]
-    else:
-        cmd = [
-            "ffmpeg", "-y",
-            "-ss", f"{start_s:.3f}",
-            "-i", video_path,
-            "-t", f"{duration_s:.3f}",
-            "-c", "copy", "-an",
-            output_path,
-        ]
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{start_s:.3f}",
+        "-i", video_path,
+        "-t", f"{duration_s:.3f}",
+        "-c", "copy", "-an",
+        output_path,
+    ]
     subprocess.run(cmd, capture_output=True, check=True)
 
 
 def extract_plays(
     video_path: str, plays: list[PlayClip], output_dir: str, game_id: str,
-    workers: int = 4, reencode: bool = False,
+    workers: int = 4,
 ) -> dict:
     """Extract all play clips and write manifest."""
     game_dir = os.path.join(output_dir, game_id)
@@ -272,35 +264,33 @@ def extract_plays(
         "plays": [],
     }
 
-    # Build task list with trimmed boundaries
     tasks = []
     for play in plays:
         play_dir = os.path.join(game_dir, f"play_{play.play_num:03d}")
         os.makedirs(play_dir, exist_ok=True)
 
-        sl_dur = play.sideline_end - play.sideline_start
-        ez_dur = play.endzone_end - play.endzone_start
+        # Sideline clip
+        if play.sideline_start > 0 or play.sideline_end > 0:
+            sl_dur = play.sideline_end - play.sideline_start
+            sl_start = play.sideline_start + START_TRIM_S
+            sl_duration = sl_dur - START_TRIM_S - END_TRIM_S
 
-        # Sideline: trim start + trim end + extra camera transition trim
-        sl_start = play.sideline_start + BOUNDARY_TRIM_S
-        sl_duration = sl_dur - BOUNDARY_TRIM_S - BOUNDARY_TRIM_S - SIDELINE_END_TRIM_S
+            if sl_duration > 1.0:
+                tasks.append((video_path, sl_start, sl_duration,
+                              os.path.join(play_dir, "sideline.mp4")))
 
-        # Endzone: trim start + trim end
-        ez_start = play.endzone_start + BOUNDARY_TRIM_S
-        ez_duration = ez_dur - BOUNDARY_TRIM_S - BOUNDARY_TRIM_S
+        # Endzone clip
+        if play.endzone_end > 0:
+            ez_dur = play.endzone_end - play.endzone_start
+            ez_start = play.endzone_start + START_TRIM_S
+            ez_duration = ez_dur - START_TRIM_S - END_TRIM_S
 
-        sideline_path = os.path.join(play_dir, "sideline.mp4")
-        endzone_path = os.path.join(play_dir, "endzone.mp4")
+            if ez_duration > 1.0:
+                tasks.append((video_path, ez_start, ez_duration,
+                              os.path.join(play_dir, "endzone.mp4")))
 
-        if sl_duration > 1.0:
-            tasks.append((video_path, sl_start, sl_duration, sideline_path, reencode))
-        else:
-            print(f"  Warning: play {play.play_num} sideline too short ({sl_dur:.1f}s), skipping")
-
-        if ez_duration > 1.0:
-            tasks.append((video_path, ez_start, ez_duration, endzone_path, reencode))
-        else:
-            print(f"  Warning: play {play.play_num} endzone too short ({ez_dur:.1f}s), skipping")
+        sl_dur_raw = play.sideline_end - play.sideline_start
+        ez_dur_raw = play.endzone_end - play.endzone_start if play.endzone_end > 0 else 0
 
         manifest["plays"].append({
             "play_num": play.play_num,
@@ -308,19 +298,17 @@ def extract_plays(
                 "file": "sideline.mp4",
                 "start_s": round(play.sideline_start, 2),
                 "end_s": round(play.sideline_end, 2),
-                "duration_s": round(sl_dur, 2),
+                "duration_s": round(sl_dur_raw, 2),
             },
             "endzone": {
                 "file": "endzone.mp4",
                 "start_s": round(play.endzone_start, 2),
                 "end_s": round(play.endzone_end, 2),
-                "duration_s": round(ez_dur, 2),
-            },
+                "duration_s": round(ez_dur_raw, 2),
+            } if play.endzone_end > 0 else None,
         })
 
-    # Extract clips in parallel
-    print(f"\n  Extracting {len(tasks)} clips ({workers} workers, "
-          f"{'re-encode' if reencode else 'stream copy'})...")
+    print(f"\n  Extracting {len(tasks)} clips ({workers} workers, stream copy)...")
     completed = 0
     errors = 0
 
@@ -351,7 +339,6 @@ def extract_plays(
 # ── Preview ────────────────────────────────────────────────────────────────
 
 def preview_timeline(
-    cuts: list[float],
     segments: list[Segment],
     plays: list[PlayClip],
     duration_s: float,
@@ -368,26 +355,19 @@ def preview_timeline(
 
     fig, ax = plt.subplots(figsize=(24, 3))
 
-    # Draw segments
+    colors = {"sideline": "blue", "endzone": "orange", "scoreboard": "#D3D3D3"}
     for seg in segments:
-        color = "#90EE90" if seg.is_field else "#D3D3D3"
-        ax.axvspan(seg.start_s, seg.end_s, alpha=0.4, color=color)
+        ax.axvspan(seg.start_s, seg.end_s, alpha=0.5,
+                    color=colors.get(seg.view_type, "gray"))
 
-    # Draw plays
     for play in plays:
-        ax.axvspan(play.sideline_start, play.sideline_end, alpha=0.6, color="blue")
-        ax.axvspan(play.endzone_start, play.endzone_end, alpha=0.6, color="orange")
-        mid = (play.sideline_start + play.endzone_end) / 2
+        mid = (play.sideline_start + (play.endzone_end or play.sideline_end)) / 2
         ax.text(mid, 0.5, str(play.play_num), fontsize=5, ha="center", va="center")
-
-    # Draw cut lines
-    for c in cuts:
-        ax.axvline(x=c, color="red", linewidth=0.3, alpha=0.5)
 
     ax.set_xlim(0, duration_s)
     ax.set_ylim(0, 1)
     ax.set_xlabel("Time (s)")
-    ax.set_title(f"Blue=Sideline, Orange=Endzone, Gray=Non-field ({len(plays)} plays)")
+    ax.set_title(f"Blue=Sideline, Orange=Endzone, Gray=Scoreboard ({len(plays)} plays)")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
@@ -408,20 +388,16 @@ def main():
         help="Output directory (default: videos/clips/)",
     )
     parser.add_argument(
+        "--model", default=VIEW_MODEL_PATH,
+        help=f"Path to view classifier weights (default: {VIEW_MODEL_PATH})",
+    )
+    parser.add_argument(
         "--preview", action="store_true",
         help="Generate timeline visualization only, no clip extraction",
     )
     parser.add_argument(
-        "--scdet-threshold", type=float, default=SCDET_THRESHOLD,
-        help=f"Scene detection threshold (default: {SCDET_THRESHOLD})",
-    )
-    parser.add_argument(
         "--workers", type=int, default=4,
         help="Parallel ffmpeg workers for extraction (default: 4)",
-    )
-    parser.add_argument(
-        "--reencode", action="store_true",
-        help="Use re-encode instead of stream copy (slower but frame-precise)",
     )
     args = parser.parse_args()
 
@@ -430,17 +406,26 @@ def main():
         print(f"ERROR: Video not found: {video_path}")
         sys.exit(1)
 
+    model_path = args.model
+    if not os.path.exists(model_path):
+        print(f"ERROR: View classifier model not found: {model_path}")
+        print("Train with: data/view_classifier/ training data")
+        sys.exit(1)
+
     print(f"Processing: {os.path.basename(video_path)}")
     print(f"Game ID:    {args.game_id}\n")
 
-    # Step 1: Get video info and detect hard cuts
-    duration_s, fps = get_video_info(video_path)
-    print(f"Video: {duration_s:.0f}s ({duration_s/60:.1f} min), {fps:.2f} fps")
-    cuts = detect_cuts(video_path, threshold=args.scdet_threshold)
+    # Step 1: Classify frames
+    classifications = classify_frames(video_path, model_path)
 
-    # Step 2: Classify segments between cuts
-    print("\nClassifying segments...")
-    segments = classify_segments(video_path, cuts, duration_s)
+    # Get duration
+    cap = cv2.VideoCapture(video_path)
+    duration_s = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+
+    # Step 2: Find segments from transitions
+    print("\nFinding view segments...")
+    segments = find_segments(classifications, duration_s)
 
     # Step 3: Group into plays
     print("\nGrouping plays...")
@@ -453,20 +438,23 @@ def main():
 
     # Summary
     sl_durs = [p.sideline_end - p.sideline_start for p in plays]
-    ez_durs = [p.endzone_end - p.endzone_start for p in plays]
-    print(f"\n  Sideline: {np.mean(sl_durs):.1f}s avg ({np.min(sl_durs):.1f}-{np.max(sl_durs):.1f}s)")
-    print(f"  Endzone:  {np.mean(ez_durs):.1f}s avg ({np.min(ez_durs):.1f}-{np.max(ez_durs):.1f}s)")
+    ez_durs = [p.endzone_end - p.endzone_start for p in plays if p.endzone_end > 0]
+    print(f"\n  Sideline: {np.mean(sl_durs):.1f}s avg "
+          f"({np.min(sl_durs):.1f}-{np.max(sl_durs):.1f}s)")
+    if ez_durs:
+        print(f"  Endzone:  {np.mean(ez_durs):.1f}s avg "
+              f"({np.min(ez_durs):.1f}-{np.max(ez_durs):.1f}s)")
 
     if args.preview:
         os.makedirs(args.output, exist_ok=True)
         preview_path = os.path.join(args.output, f"{args.game_id}_timeline.png")
-        preview_timeline(cuts, segments, plays, duration_s, preview_path)
+        preview_timeline(segments, plays, duration_s, preview_path)
         return
 
     # Step 4: Extract clips
     print(f"\nExtracting clips to {args.output}...")
     extract_plays(video_path, plays, args.output, args.game_id,
-                  workers=args.workers, reencode=args.reencode)
+                  workers=args.workers)
     print(f"\nDone! {len(plays)} plays → {os.path.join(args.output, args.game_id)}/")
 
 
