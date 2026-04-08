@@ -20,6 +20,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLIPS_DIRS = [
     os.path.join(PROJECT_ROOT, "videos", "clips", "2019092204"),   # Ravens @ Chiefs
     os.path.join(PROJECT_ROOT, "videos", "clips", "2019102712"),   # Chiefs vs Packers
+    os.path.join(PROJECT_ROOT, "videos", "clips", "2024090801"),   # Packers @ Eagles
+    os.path.join(PROJECT_ROOT, "videos", "clips", "2024090802"),   # Lions @ Rams
+    os.path.join(PROJECT_ROOT, "videos", "clips", "2024091501"),   # Saints @ Cowboys
+    os.path.join(PROJECT_ROOT, "videos", "clips", "2024092201"),   # Bengals @ Commanders
+    os.path.join(PROJECT_ROOT, "videos", "clips", "2024102701"),   # Packers @ Jaguars
+    os.path.join(PROJECT_ROOT, "videos", "clips", "2024111001"),   # Steelers @ Commanders
 ]
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "data", "annotations", "images")
 

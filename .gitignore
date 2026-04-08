@@ -1,3 +1,8 @@
+# Secrets
+.env
+.runpod_pod.json
+.ssh_pubkey
+
 # Python
 .venv/
 .venv-labelstudio/
