@@ -51,9 +51,10 @@ HASH_SPACING = HASH_Y_FAR - HASH_Y_NEAR  # 6.167 yards (18 feet 6 inches)
 
 # ── Painted numbers ─────────────────────────────────────────────────────────
 
-# Numbers positioned 12 yards from each sideline
-NUMBER_Y_NEAR = 12.0       # numbers on the near side
-NUMBER_Y_FAR = FIELD_WIDTH - 12.0  # = 41.33 yards
+# NFL spec: bottom of numbers 12 yards from sideline. Numbers are 2 yards tall,
+# so the center is at 13 yards from the sideline.
+NUMBER_Y_NEAR = 13.0       # center of near-side numbers
+NUMBER_Y_FAR = FIELD_WIDTH - 13.0  # center of far-side numbers
 
 
 # ── Reference point generation ──────────────────────────────────────────────

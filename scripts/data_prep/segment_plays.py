@@ -239,9 +239,16 @@ def group_plays(segments: list[Segment]) -> list[PlayClip]:
 
 # ── Clip extraction ────────────────────────────────────────────────────────
 
+TARGET_FPS = 30  # Normalize all clips to 30fps (2024 games are 60fps)
+
+
 def extract_clip(video_path: str, start_s: float, duration_s: float,
                  output_path: str) -> None:
-    """Extract a clip using stream copy."""
+    """Extract a clip, downsampling to 30fps if needed.
+
+    Uses stream copy when source is already 30fps, re-encodes only when
+    the source is higher (e.g. 60fps from 2024 games).
+    """
     if duration_s <= 0:
         return
     cmd = [
@@ -249,7 +256,9 @@ def extract_clip(video_path: str, start_s: float, duration_s: float,
         "-ss", f"{start_s:.3f}",
         "-i", video_path,
         "-t", f"{duration_s:.3f}",
-        "-c", "copy", "-an",
+        "-r", str(TARGET_FPS),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-an",
         output_path,
     ]
     subprocess.run(cmd, capture_output=True, check=True)

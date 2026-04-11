@@ -92,8 +92,15 @@ def ssh_is_reachable(host, port, timeout=5):
         return False
 
 
-def wait_for_pod(rp, pod_id, gpu_type, timeout_sec=600):
-    """Wait for a pod to be ready with SSH accessible. Returns pod info or None."""
+def wait_for_pod(rp, pod_id, gpu_type, timeout_sec=600, container_timeout_sec=120):
+    """Wait for a pod to be ready with SSH accessible. Returns pod info or None.
+
+    Two-phase wait:
+      1. Wait for the API to report runtime ports (container started).
+         If this takes longer than container_timeout_sec, the host is likely
+         stuck pulling the Docker image — return None so caller can retry.
+      2. Wait for SSH to accept connections (banner check).
+    """
     print("Waiting for pod to start...")
     start = time.time()
     phase = "api"  # api -> ssh
@@ -109,6 +116,11 @@ def wait_for_pod(rp, pod_id, gpu_type, timeout_sec=600):
 
         # Phase 1: wait for API to report runtime with SSH port info
         if phase == "api":
+            # Detect stuck container: if ports stay null too long, host is bad
+            if elapsed > container_timeout_sec:
+                print(f"\n  Container not starting after {container_timeout_sec}s — host may be stuck.")
+                return None
+
             ssh_host, ssh_port, ssh_user = get_ssh_info(info)
             if ssh_host and ssh_port:
                 print(f"\n  Container running. Waiting for SSH...")

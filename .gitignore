@@ -28,12 +28,18 @@ models/
 !data/annotations/export_final/
 !data/annotations/export_final/labels/
 !data/annotations/export_final/classes.txt
-!data/annotations/200_frames_hand_labeled.zip
 !data/annotations/labels/
+!data/field_keypoints/
+!data/field_keypoints/labeling_config.xml
 
-# Training images (large binary files, regeneratable)
+# Training data (large binary files, regeneratable)
 data/annotations/images/
 data/view_classifier/
+data/player_detection/
+data/field_keypoints/synthetic/
+data/field_keypoints/annotation_images/
+data/field_keypoints/train/
+data/field_keypoints/valid/
 
 # Output (generated images, tracking results)
 output/

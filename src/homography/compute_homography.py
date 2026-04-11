@@ -15,7 +15,9 @@ import numpy as np
 import cv2
 from dataclasses import dataclass
 
-from .field_features import FieldFeatures
+# FieldFeatures was planned but never created — the ML pipeline
+# bypasses generate_correspondences() and calls compute_homography() directly
+# from .field_features import FieldFeatures
 from . import field_model
 
 

@@ -117,7 +117,7 @@ def process_play(
             if H is not None and len(tracking_result) > 0:
                 foot_points = tracking_result.foot_points
                 # Apply homography to foot points
-                from scripts.homography.apply_homography import pixel_to_field, is_on_field
+                from src.homography.apply_homography import pixel_to_field, is_on_field
                 field_coords = pixel_to_field(foot_points, H)
                 on_field = is_on_field(field_coords)
 
