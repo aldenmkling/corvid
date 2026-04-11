@@ -31,8 +31,8 @@ def main():
     parser = argparse.ArgumentParser(description="Train RF-DETR-Large for All-22 player detection")
     parser.add_argument("--dataset", default="dataset", help="Path to COCO dataset directory (default: dataset/)")
     parser.add_argument("--epochs", type=int, default=50, help="Training epochs (default: 50)")
-    parser.add_argument("--batch-size", type=int, default=16, help="Batch size per GPU (default: 16, halve if OOM)")
-    parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps (default: 1)")
+    parser.add_argument("--batch-size", type=int, default=4, help="Batch size per GPU (default: 4)")
+    parser.add_argument("--grad-accum", type=int, default=2, help="Gradient accumulation steps (default: 2)")
     parser.add_argument("--resolution", type=int, default=1280, help="Input resolution, must be divisible by 64 (default: 1280)")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate (default: 1e-4)")
     parser.add_argument("--output", default="output", help="Output directory for checkpoints (default: output/)")
@@ -69,7 +69,7 @@ def main():
     print(f"  Dataset:     {os.path.abspath(args.dataset)}")
     print(f"  Resolution:  {args.resolution}px")
     print(f"  Epochs:      {args.epochs}")
-    print(f"  Batch size:  {args.batch_size} × {args.devices} GPU(s) × {args.grad_accum} accum = {effective_batch} effective")
+    print(f"  Batch size:  {args.batch_size}/GPU × {args.devices} GPU(s) × {args.grad_accum} accum = {effective_batch} effective")
     print(f"  LR:          {args.lr}")
     print(f"  Output:      {args.output}")
     print(f"  Resume:      {args.resume or 'None (training from pretrained)'}")
@@ -96,7 +96,7 @@ def main():
         wandb=args.wandb,
         project=args.project if args.wandb else None,
         multi_scale=True,
-        num_workers=4,
+        num_workers=8,
         checkpoint_interval=10,
     )
 

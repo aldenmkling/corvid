@@ -19,14 +19,20 @@ Usage:
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
+
+# Log file for detached runs
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output", "logs")
+PID_FILE = os.path.join(LOG_DIR, "segment_plays.pid")
 
 
 # ── Configuration ──────────────────────────────────────────────────────────
@@ -375,32 +381,102 @@ def preview_timeline(
     plt.close()
 
 
+# ── Detached launch / check ───────────────────────────────────────────────
+
+def log_path_for_game(game_id: str) -> str:
+    return os.path.join(LOG_DIR, f"segment_{game_id}.log")
+
+
+def launch_detached(video_path: str, game_id: str, output: str, model: str,
+                    workers: int) -> None:
+    """Launch segmentation as a detached background process with log file."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log_file = log_path_for_game(game_id)
+
+    script_path = os.path.abspath(__file__)
+    # Use the same Python interpreter that's running this script (respects venv)
+    python_path = sys.executable
+
+    # Build command as list to avoid shell quoting issues with spaces in paths
+    cmd_args = [
+        python_path, "-u", script_path,
+        "--video", video_path,
+        "--game-id", game_id,
+        "--output", output,
+        "--model", model,
+        "--workers", str(workers),
+    ]
+
+    # Launch with nohup via Popen, redirect stdout/stderr to log file
+    with open(log_file, "w") as log_f:
+        proc = subprocess.Popen(
+            cmd_args,
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,  # detach from parent session (like nohup)
+        )
+
+    # Save PID for checking later
+    with open(PID_FILE, "a") as f:
+        f.write(f"{game_id}:{proc.pid}\n")
+
+    print(f"Launched segmentation for {game_id} (PID {proc.pid})")
+    print(f"  Log: {log_file}")
+
+
+def check_segmentation() -> None:
+    """Check progress of running segmentation jobs."""
+    if not os.path.exists(PID_FILE):
+        print("No segmentation jobs found.")
+        return
+
+    with open(PID_FILE) as f:
+        jobs = [line.strip().split(":", 1) for line in f if line.strip()]
+
+    for game_id, pid in jobs:
+        log_file = log_path_for_game(game_id)
+
+        # Check if process is still running
+        try:
+            os.kill(int(pid), 0)
+            running = True
+        except (OSError, ValueError):
+            running = False
+
+        # Check log for completion
+        done = False
+        last_lines = ""
+        if os.path.exists(log_file):
+            with open(log_file) as f:
+                content = f.read()
+            done = "Done!" in content
+            lines = content.strip().split("\n")
+            last_lines = "\n".join(lines[-5:])
+
+        status = "RUNNING" if running else ("COMPLETED" if done else "STOPPED/FAILED")
+        print(f"[{game_id}] {status} (PID {pid})")
+        print(f"  Log: {log_file}")
+        if last_lines:
+            for line in last_lines.split("\n"):
+                print(f"    {line}")
+        print()
+
+    # Clean up PID file if all jobs are done
+    all_done = True
+    for game_id, pid in jobs:
+        try:
+            os.kill(int(pid), 0)
+            all_done = False
+        except (OSError, ValueError):
+            pass
+    if all_done:
+        os.remove(PID_FILE)
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Segment All-22 game video into per-play clips"
-    )
-    parser.add_argument("--video", required=True, help="Path to game MP4")
-    parser.add_argument("--game-id", required=True, help="Game ID (e.g. 2019092204)")
-    parser.add_argument(
-        "--output", default="videos/clips/",
-        help="Output directory (default: videos/clips/)",
-    )
-    parser.add_argument(
-        "--model", default=VIEW_MODEL_PATH,
-        help=f"Path to view classifier weights (default: {VIEW_MODEL_PATH})",
-    )
-    parser.add_argument(
-        "--preview", action="store_true",
-        help="Generate timeline visualization only, no clip extraction",
-    )
-    parser.add_argument(
-        "--workers", type=int, default=4,
-        help="Parallel ffmpeg workers for extraction (default: 4)",
-    )
-    args = parser.parse_args()
-
+def run_segmentation(args):
+    """Run segmentation directly (called either interactively or from nohup)."""
     video_path = os.path.abspath(args.video)
     if not os.path.exists(video_path):
         print(f"ERROR: Video not found: {video_path}")
@@ -456,6 +532,57 @@ def main():
     extract_plays(video_path, plays, args.output, args.game_id,
                   workers=args.workers)
     print(f"\nDone! {len(plays)} plays → {os.path.join(args.output, args.game_id)}/")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Segment All-22 game video into per-play clips"
+    )
+    parser.add_argument("--video", help="Path to game MP4")
+    parser.add_argument("--game-id", help="Game ID (e.g. 2019092204)")
+    parser.add_argument(
+        "--output", default="videos/clips/",
+        help="Output directory (default: videos/clips/)",
+    )
+    parser.add_argument(
+        "--model", default=VIEW_MODEL_PATH,
+        help=f"Path to view classifier weights (default: {VIEW_MODEL_PATH})",
+    )
+    parser.add_argument(
+        "--preview", action="store_true",
+        help="Generate timeline visualization only, no clip extraction",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=4,
+        help="Parallel ffmpeg workers for extraction (default: 4)",
+    )
+    parser.add_argument(
+        "--detach", action="store_true",
+        help="Launch in background with nohup (survives session disconnect)",
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="Check progress of running segmentation jobs",
+    )
+    args = parser.parse_args()
+
+    if args.check:
+        check_segmentation()
+        return
+
+    if not args.video or not args.game_id:
+        parser.error("--video and --game-id are required (unless using --check)")
+
+    if args.detach:
+        launch_detached(
+            video_path=os.path.abspath(args.video),
+            game_id=args.game_id,
+            output=args.output,
+            model=args.model,
+            workers=args.workers,
+        )
+    else:
+        run_segmentation(args)
 
 
 if __name__ == "__main__":
