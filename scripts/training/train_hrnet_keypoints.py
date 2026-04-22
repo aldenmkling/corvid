@@ -7,7 +7,7 @@ Two-stage training:
   2. Fine-tune on real annotated data (~240 frames)
 
 Input: 960×540 images
-Output: 240×135 heatmaps (106 channels, one per keypoint)
+Output: 256×448 heatmaps (2 channels: sideline, hash)
 Loss: MSE on Gaussian heatmaps, averaged over visible keypoints only
 
 Usage (on RunPod):
@@ -46,10 +46,11 @@ except ImportError:
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-NUM_KEYPOINTS = 110  # 106 identity + 4 category
-INPUT_H, INPUT_W = 540, 960
-HEATMAP_H, HEATMAP_W = 135, 240  # 1/4 resolution
-HEATMAP_SIGMA = 2.0  # Gaussian sigma in heatmap pixels
+NUM_CHANNELS = 2      # sideline_intersection, hash_intersection
+INPUT_H, INPUT_W = 512, 896
+HEATMAP_H, HEATMAP_W = 256, 448  # 1/2 resolution (HRNet stage 0 output)
+SIGMA_MAX = 6.0   # wide Gaussians early (easy to learn)
+SIGMA_MIN = 1.0   # tight Gaussians late (forces precision)
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
@@ -66,13 +67,18 @@ def _generate_heatmap(cx: float, cy: float, h: int, w: int, sigma: float) -> np.
 
 
 class FieldKeypointDataset(Dataset):
-    """COCO keypoints dataset for field keypoint detection."""
+    """Dataset for 2-channel field keypoint detection.
 
-    def __init__(self, data_dir: str, augment: bool = True,
-                 flip_mapping: dict | None = None):
+    Annotations use a simple JSON format:
+      {"points": [{"x": px, "y": py, "channel": 0-1, "visible": true}, ...]}
+
+    Each channel can have MULTIPLE peaks (one per visible instance of that type).
+    """
+
+    def __init__(self, data_dir: str, augment: bool = True):
         self.data_dir = data_dir
         self.augment = augment
-        self.flip_mapping = flip_mapping
+        self.sigma = SIGMA_MAX  # updated by training loop each epoch
 
         ann_path = os.path.join(data_dir, "annotations.json")
         with open(ann_path) as f:
@@ -101,39 +107,43 @@ class FieldKeypointDataset(Dataset):
             raise FileNotFoundError(f"Cannot read {img_path}")
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        # Parse keypoints: [x0, y0, v0, x1, y1, v1, ...]
-        kp_flat = ann["keypoints"]
-        keypoints = np.array(kp_flat, dtype=np.float32).reshape(NUM_KEYPOINTS, 3)
-        # keypoints[:, 0] = x, keypoints[:, 1] = y, keypoints[:, 2] = visibility
+        # Parse points: list of {x, y, channel, visible}
+        points = ann["points"]
 
         # Resize image to input size
         orig_h, orig_w = img.shape[:2]
         img = cv2.resize(img, (INPUT_W, INPUT_H))
         scale_x = INPUT_W / orig_w
         scale_y = INPUT_H / orig_h
-        keypoints[:, 0] *= scale_x
-        keypoints[:, 1] *= scale_y
+
+        # Scale point coordinates
+        scaled_points = []
+        for p in points:
+            if p["visible"]:
+                scaled_points.append({
+                    "x": p["x"] * scale_x,
+                    "y": p["y"] * scale_y,
+                    "channel": p["channel"],
+                })
 
         # Augmentation
         if self.augment:
-            img, keypoints = self._augment(img, keypoints)
+            img, scaled_points = self._augment(img, scaled_points)
 
-        # Generate heatmaps
-        heatmaps = np.zeros((NUM_KEYPOINTS, HEATMAP_H, HEATMAP_W), dtype=np.float32)
-        visibility = np.zeros(NUM_KEYPOINTS, dtype=np.float32)
+        # Generate multi-peak heatmaps (2 channels)
+        heatmaps = np.zeros((NUM_CHANNELS, HEATMAP_H, HEATMAP_W), dtype=np.float32)
+        channel_has_peaks = np.zeros(NUM_CHANNELS, dtype=np.float32)
 
-        for ki in range(NUM_KEYPOINTS):
-            v = keypoints[ki, 2]
-            if v > 0:
-                # Scale to heatmap resolution
-                hm_x = keypoints[ki, 0] * HEATMAP_W / INPUT_W
-                hm_y = keypoints[ki, 1] * HEATMAP_H / INPUT_H
+        for p in scaled_points:
+            hm_x = p["x"] * HEATMAP_W / INPUT_W
+            hm_y = p["y"] * HEATMAP_H / INPUT_H
+            ch = p["channel"]
 
-                if 0 <= hm_x < HEATMAP_W and 0 <= hm_y < HEATMAP_H:
-                    heatmaps[ki] = _generate_heatmap(
-                        hm_x, hm_y, HEATMAP_H, HEATMAP_W, HEATMAP_SIGMA
-                    )
-                    visibility[ki] = 1.0
+            if 0 <= hm_x < HEATMAP_W and 0 <= hm_y < HEATMAP_H:
+                # Add peak to channel (use max so overlapping peaks don't exceed 1.0)
+                peak = _generate_heatmap(hm_x, hm_y, HEATMAP_H, HEATMAP_W, self.sigma)
+                heatmaps[ch] = np.maximum(heatmaps[ch], peak)
+                channel_has_peaks[ch] = 1.0
 
         # Normalize image
         img = img.astype(np.float32) / 255.0
@@ -146,74 +156,62 @@ class FieldKeypointDataset(Dataset):
         return (
             torch.from_numpy(img),
             torch.from_numpy(heatmaps),
-            torch.from_numpy(visibility),
+            torch.from_numpy(channel_has_peaks),
         )
 
-    def _augment(self, img: np.ndarray, keypoints: np.ndarray) -> tuple:
-        """Apply augmentations. NO vertical flip."""
+    def _augment(self, img: np.ndarray, points: list[dict]) -> tuple:
+        """Apply augmentations. Returns (img, points)."""
         h, w = img.shape[:2]
 
-        # Horizontal flip with keypoint remapping
-        if self.flip_mapping and np.random.random() < 0.5:
-            img = cv2.flip(img, 1)  # horizontal flip
-            keypoints[:, 0] = w - 1 - keypoints[:, 0]
-
-            # Remap keypoint identities
-            new_kp = keypoints.copy()
-            for old_id, new_id in self.flip_mapping.items():
-                new_kp[new_id] = keypoints[old_id]
-            keypoints = new_kp
+        # Horizontal flip (no channel remapping needed — types are symmetric)
+        if np.random.random() < 0.5:
+            img = cv2.flip(img, 1)
+            for p in points:
+                p["x"] = w - 1 - p["x"]
 
         # Random rotation (±10°)
         angle = np.random.uniform(-10, 10)
         M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
         img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REFLECT)
 
-        # Transform keypoint coordinates
-        for ki in range(NUM_KEYPOINTS):
-            if keypoints[ki, 2] > 0:
-                pt = np.array([keypoints[ki, 0], keypoints[ki, 1], 1.0])
-                new_pt = M @ pt
-                keypoints[ki, 0] = new_pt[0]
-                keypoints[ki, 1] = new_pt[1]
-                # Mark as invisible if rotated out of frame
-                if not (0 <= new_pt[0] < w and 0 <= new_pt[1] < h):
-                    keypoints[ki, 2] = 0
+        new_points = []
+        for p in points:
+            pt = np.array([p["x"], p["y"], 1.0])
+            new_pt = M @ pt
+            if 0 <= new_pt[0] < w and 0 <= new_pt[1] < h:
+                new_points.append({"x": new_pt[0], "y": new_pt[1], "channel": p["channel"]})
+        points = new_points
 
-        # Random scale (0.8-1.2) via crop/pad
+        # Random scale (0.8-1.2)
         scale = np.random.uniform(0.8, 1.2)
         if scale != 1.0:
             new_w, new_h = int(w * scale), int(h * scale)
             img_scaled = cv2.resize(img, (new_w, new_h))
-            keypoints[:, 0] *= scale
-            keypoints[:, 1] *= scale
+            for p in points:
+                p["x"] *= scale
+                p["y"] *= scale
 
-            # Center crop/pad back to original size
             if scale > 1.0:
-                # Crop center
                 x1 = (new_w - w) // 2
                 y1 = (new_h - h) // 2
                 img = img_scaled[y1:y1 + h, x1:x1 + w]
-                keypoints[:, 0] -= x1
-                keypoints[:, 1] -= y1
+                for p in points:
+                    p["x"] -= x1
+                    p["y"] -= y1
             else:
-                # Pad
                 img = np.zeros((h, w, 3), dtype=img_scaled.dtype)
                 x1 = (w - new_w) // 2
                 y1 = (h - new_h) // 2
                 img[y1:y1 + new_h, x1:x1 + new_w] = img_scaled
-                keypoints[:, 0] += x1
-                keypoints[:, 1] += y1
+                for p in points:
+                    p["x"] += x1
+                    p["y"] += y1
 
-            # Update visibility for out-of-frame keypoints
-            for ki in range(NUM_KEYPOINTS):
-                if keypoints[ki, 2] > 0:
-                    if not (0 <= keypoints[ki, 0] < w and 0 <= keypoints[ki, 1] < h):
-                        keypoints[ki, 2] = 0
+            points = [p for p in points if 0 <= p["x"] < w and 0 <= p["y"] < h]
 
         # Color jitter
         img = img.astype(np.float32)
-        img *= np.random.uniform(0.8, 1.2)  # brightness
+        img *= np.random.uniform(0.8, 1.2)
         img = np.clip(img, 0, 255).astype(np.uint8)
 
         # Gaussian blur
@@ -221,120 +219,153 @@ class FieldKeypointDataset(Dataset):
             sigma = np.random.uniform(0.5, 2.0)
             img = cv2.GaussianBlur(img, (0, 0), sigma)
 
-        return img, keypoints
+        return img, points
 
 
 # ── Model ────────────────────────────────────────────────────────────────────
 
 class HRNetKeypointModel(nn.Module):
-    """HRNet-W48 backbone + keypoint heatmap head."""
+    """HRNet-W48 backbone + 2-channel heatmap head."""
 
-    def __init__(self, num_keypoints: int = NUM_KEYPOINTS, pretrained: bool = True):
+    def __init__(self, num_channels: int = NUM_CHANNELS, pretrained: bool = True):
         super().__init__()
         import timm
 
-        # HRNet-W48 as feature extractor
         self.backbone = timm.create_model(
             "hrnet_w48",
             pretrained=pretrained,
             features_only=True,
-            out_indices=(0,),  # only need highest resolution (1/4)
+            out_indices=(0,),
         )
 
-        # Get the number of channels from the backbone
-        # HRNet-W48 stage 0 output: 48 channels at 1/4 resolution
-        backbone_channels = 48
+        backbone_channels = 64  # HRNet-W48 stage 0
 
-        # Heatmap head: 1×1 conv
         self.head = nn.Sequential(
             nn.Conv2d(backbone_channels, backbone_channels, 3, padding=1, bias=False),
             nn.BatchNorm2d(backbone_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(backbone_channels, num_keypoints, 1, bias=True),
+            nn.Conv2d(backbone_channels, num_channels, 1, bias=True),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass.
-
-        Args:
-            x: (B, 3, 540, 960) input images
-
-        Returns:
-            (B, 106, 135, 240) heatmaps
-        """
+        """Forward pass. Returns (B, 3, H/2, W/2) heatmaps."""
         features = self.backbone(x)
-        heatmaps = self.head(features[0])
-        return heatmaps
+        return self.head(features[0])
 
 
 # ── Training loop ────────────────────────────────────────────────────────────
 
-def compute_loss(pred_heatmaps, gt_heatmaps, visibility):
-    """MSE loss averaged over visible keypoints only.
+def compute_loss(pred_heatmaps, gt_heatmaps, channel_has_peaks, channel_weights=None):
+    """CenterNet-style focal loss for multi-peak heatmaps.
+
+    Adapted from CornerNet/CenterNet. Handles the sparse peak problem:
+    - At GT peak locations (gt=1): penalize if prediction is low
+    - At background (gt<1): penalize if prediction is high, but reduce
+      penalty near GT peaks (where some activation is expected)
 
     Args:
-        pred_heatmaps: (B, K, H, W)
-        gt_heatmaps: (B, K, H, W)
-        visibility: (B, K) - 1.0 if visible, 0.0 if not
+        pred_heatmaps: (B, C, H, W) — raw model output (will be sigmoided)
+        gt_heatmaps: (B, C, H, W) — Gaussian targets, peak=1.0
+        channel_has_peaks: (B, C) — unused but kept for API compatibility
+        channel_weights: optional (C,) tensor of per-channel loss multipliers.
+            Used to upweight underperforming classes (e.g. sidelines).
     """
-    # Mask invisible keypoints
-    mask = visibility.unsqueeze(-1).unsqueeze(-1)  # (B, K, 1, 1)
-    diff = (pred_heatmaps - gt_heatmaps) ** 2 * mask
+    # Sigmoid to constrain predictions to [0, 1]
+    pred = torch.sigmoid(pred_heatmaps)
 
-    # Average over spatial dims, then over visible keypoints
-    spatial_mean = diff.mean(dim=(-2, -1))  # (B, K)
-    n_visible = visibility.sum(dim=1).clamp(min=1)  # (B,)
-    loss = (spatial_mean.sum(dim=1) / n_visible).mean()  # scalar
+    # Clamp for numerical stability
+    pred = pred.clamp(min=1e-6, max=1 - 1e-6)
+
+    # Separate peak and background pixels
+    pos_mask = (gt_heatmaps >= 0.9).float()
+    neg_mask = (gt_heatmaps < 0.9).float()
+
+    # Focal weights
+    alpha = 2.0
+    beta = 2.0
+
+    pos_loss = -torch.log(pred) * torch.pow(1 - pred, alpha) * pos_mask
+    neg_weight = torch.pow(1 - gt_heatmaps, beta)
+    neg_loss = -torch.log(1 - pred) * torch.pow(pred, alpha) * neg_weight * neg_mask
+
+    # Apply per-channel weights (broadcast over B, H, W).
+    if channel_weights is not None:
+        w = channel_weights.to(pred.device).view(1, -1, 1, 1)
+        pos_loss = pos_loss * w
+        neg_loss = neg_loss * w
+
+    # Normalize by number of peaks
+    n_peaks = pos_mask.sum().clamp(min=1)
+    loss = (pos_loss.sum() + neg_loss.sum()) / n_peaks
 
     return loss
 
 
-def compute_pck(pred_heatmaps, gt_heatmaps, visibility, threshold_px=10):
-    """Percentage of Correct Keypoints at given pixel threshold.
+def compute_detection_score(pred_heatmaps, gt_heatmaps, channel_has_peaks, threshold=0.3):
+    """Measure how well the model detects peaks.
 
-    Args:
-        pred_heatmaps: (B, K, H, W)
-        gt_heatmaps: (B, K, H, W)
-        visibility: (B, K)
-        threshold_px: distance threshold in heatmap pixels
+    For each GT peak location, check if the predicted heatmap has a value
+    above threshold within a radius. Returns (precision, recall).
     """
-    B, K, H, W = pred_heatmaps.shape
+    from scipy import ndimage
 
-    # Get predicted and GT peak positions
-    pred_flat = pred_heatmaps.view(B, K, -1)
-    gt_flat = gt_heatmaps.view(B, K, -1)
+    # Apply sigmoid since model outputs logits with focal loss
+    pred_heatmaps = torch.sigmoid(pred_heatmaps)
 
-    pred_idx = pred_flat.argmax(dim=2)
-    gt_idx = gt_flat.argmax(dim=2)
+    B, C, H, W = pred_heatmaps.shape
+    total_gt_peaks = 0
+    total_detected = 0
+    total_pred_peaks = 0
 
-    pred_x = (pred_idx % W).float()
-    pred_y = (pred_idx // W).float()
-    gt_x = (gt_idx % W).float()
-    gt_y = (gt_idx // W).float()
+    for b in range(B):
+        for c in range(C):
+            gt = gt_heatmaps[b, c].cpu().numpy()
+            pred = pred_heatmaps[b, c].cpu().numpy()
 
-    dist = torch.sqrt((pred_x - gt_x) ** 2 + (pred_y - gt_y) ** 2)
+            # Find GT peak locations (local maxima above 0.5)
+            gt_peaks = []
+            gt_binary = (gt > 0.5)
+            if gt_binary.any():
+                labeled, n_features = ndimage.label(gt_binary)
+                for i in range(1, n_features + 1):
+                    ys, xs = np.where(labeled == i)
+                    cy, cx = ys.mean(), xs.mean()
+                    gt_peaks.append((cx, cy))
 
-    # Only count visible keypoints with non-zero GT
-    gt_has_peak = gt_flat.max(dim=2).values > 0.1
-    valid = (visibility > 0) & gt_has_peak
+            # Find predicted peaks (local maxima above threshold)
+            pred_peaks = []
+            pred_binary = (pred > threshold)
+            if pred_binary.any():
+                labeled, n_features = ndimage.label(pred_binary)
+                for i in range(1, n_features + 1):
+                    ys, xs = np.where(labeled == i)
+                    cy, cx = ys.mean(), xs.mean()
+                    pred_peaks.append((cx, cy))
 
-    if valid.sum() == 0:
-        return 1.0
+            # Match: for each GT peak, is there a pred peak within 10px?
+            for gx, gy in gt_peaks:
+                total_gt_peaks += 1
+                for px, py in pred_peaks:
+                    if np.sqrt((gx - px)**2 + (gy - py)**2) < 10:
+                        total_detected += 1
+                        break
 
-    correct = (dist < threshold_px) & valid
-    pck = correct.sum().float() / valid.sum().float()
-    return pck.item()
+            total_pred_peaks += len(pred_peaks)
+
+    recall = total_detected / max(total_gt_peaks, 1)
+    precision = total_detected / max(total_pred_peaks, 1)
+    return precision, recall
 
 
-def train_epoch(model, loader, optimizer, device, epoch):
+def train_epoch(model, loader, optimizer, device, epoch, channel_weights=None):
     model.train()
     total_loss = 0
     n_batches = 0
 
-    for batch_idx, (images, heatmaps, visibility) in enumerate(loader):
+    for batch_idx, (images, heatmaps, channel_has_peaks) in enumerate(loader):
         images = images.to(device)
         heatmaps = heatmaps.to(device)
-        visibility = visibility.to(device)
+        channel_has_peaks = channel_has_peaks.to(device)
 
         pred = model(images)
 
@@ -344,7 +375,7 @@ def train_epoch(model, loader, optimizer, device, epoch):
                 pred, size=heatmaps.shape[-2:], mode="bilinear", align_corners=False
             )
 
-        loss = compute_loss(pred, heatmaps, visibility)
+        loss = compute_loss(pred, heatmaps, channel_has_peaks, channel_weights)
 
         optimizer.zero_grad()
         loss.backward()
@@ -361,17 +392,18 @@ def train_epoch(model, loader, optimizer, device, epoch):
 
 
 @torch.no_grad()
-def validate(model, loader, device):
+def validate(model, loader, device, compute_detection=False, channel_weights=None):
+    """Validate model. Only computes expensive detection score when requested."""
     model.eval()
     total_loss = 0
-    total_pck5 = 0
-    total_pck10 = 0
+    total_precision = 0
+    total_recall = 0
     n_batches = 0
 
-    for images, heatmaps, visibility in loader:
+    for images, heatmaps, channel_has_peaks in loader:
         images = images.to(device)
         heatmaps = heatmaps.to(device)
-        visibility = visibility.to(device)
+        channel_has_peaks = channel_has_peaks.to(device)
 
         pred = model(images)
         if pred.shape[-2:] != heatmaps.shape[-2:]:
@@ -379,17 +411,21 @@ def validate(model, loader, device):
                 pred, size=heatmaps.shape[-2:], mode="bilinear", align_corners=False
             )
 
-        loss = compute_loss(pred, heatmaps, visibility)
-        pck5 = compute_pck(pred, heatmaps, visibility, threshold_px=5)
-        pck10 = compute_pck(pred, heatmaps, visibility, threshold_px=10)
-
+        loss = compute_loss(pred, heatmaps, channel_has_peaks, channel_weights)
         total_loss += loss.item()
-        total_pck5 += pck5
-        total_pck10 += pck10
+
+        if compute_detection:
+            precision, recall = compute_detection_score(pred, heatmaps, channel_has_peaks)
+            total_precision += precision
+            total_recall += recall
+
         n_batches += 1
 
     n = max(n_batches, 1)
-    return total_loss / n, total_pck5 / n, total_pck10 / n
+    if compute_detection:
+        return total_loss / n, total_precision / n, total_recall / n
+    else:
+        return total_loss / n, None, None
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -405,10 +441,16 @@ def main():
                         help="Learning rate multiplier for backbone")
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--warmup-epochs", type=int, default=5)
+    parser.add_argument("--sigma-max", type=float, default=None, help="Starting sigma (default: SIGMA_MAX)")
+    parser.add_argument("--sigma-min", type=float, default=None, help="Ending sigma (default: SIGMA_MIN)")
+    parser.add_argument("--channel-weights", type=str, default=None,
+                        help="Comma-separated per-channel loss weights, e.g. '3,1' to upweight sidelines 3x. "
+                             "Must match NUM_CHANNELS.")
     parser.add_argument("--resume", default=None, help="Path to checkpoint to resume from")
     parser.add_argument("--output", default="/workspace/output", help="Output directory")
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--patience", type=int, default=30, help="Early stopping patience")
+    parser.add_argument("--patience", type=int, default=0, help="Early stopping patience (0=disabled)")
+    parser.add_argument("--no-early-stop", action="store_true", help="Disable early stopping")
     parser.add_argument("--wandb", action="store_true", help="Log to W&B")
     parser.add_argument("--no-pretrained", action="store_true",
                         help="Don't use ImageNet pretrained backbone")
@@ -418,19 +460,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    # Build flip mapping for augmentation
-    # Import here since this runs on RunPod where keypoint_schema may not be in path
-    flip_mapping = None
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        from src.homography.keypoint_schema import FLIP_MAPPING
-        flip_mapping = FLIP_MAPPING
-        print("Loaded flip mapping for horizontal augmentation")
-    except ImportError:
-        print("Warning: could not load FLIP_MAPPING, horizontal flip disabled")
-
     # Load datasets
-    train_ds = FieldKeypointDataset(args.dataset, augment=True, flip_mapping=flip_mapping)
+    train_ds = FieldKeypointDataset(args.dataset, augment=True)
 
     if args.val_dataset:
         val_ds = FieldKeypointDataset(args.val_dataset, augment=False)
@@ -457,7 +488,7 @@ def main():
 
     # Build model
     model = HRNetKeypointModel(
-        num_keypoints=NUM_KEYPOINTS,
+        num_channels=NUM_CHANNELS,
         pretrained=not args.no_pretrained,
     ).to(device)
 
@@ -491,16 +522,44 @@ def main():
         wandb.watch(model, log_freq=100)
 
     # Training loop
-    best_pck10 = 0.0
+    best_recall = 0.0
+    best_val_loss = float('inf')
     patience_counter = 0
+
+    # Parse channel weights (e.g. "3,1" upweights channel 0 / sidelines 3x)
+    channel_weights_tensor = None
+    if args.channel_weights:
+        weights_list = [float(w) for w in args.channel_weights.split(",")]
+        assert len(weights_list) == NUM_CHANNELS, \
+            f"Got {len(weights_list)} channel weights, need {NUM_CHANNELS}"
+        channel_weights_tensor = torch.tensor(weights_list, dtype=torch.float32, device=device)
 
     print(f"\nTraining for {args.epochs} epochs...")
     print(f"  LR: backbone={args.lr * args.backbone_lr_mult:.1e}, head={args.lr:.1e}")
     print(f"  Batch size: {args.batch_size}")
+    print(f"  Channels: {NUM_CHANNELS} (0=sideline, 1=hash)")
+    if channel_weights_tensor is not None:
+        print(f"  Channel weights: {channel_weights_tensor.tolist()}")
+    print(f"  Sigma: {SIGMA_MAX} -> {SIGMA_MIN} (shrinking over training)")
     print(f"  Train samples: {len(train_ds)}, Val samples: {len(val_ds)}")
 
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
+
+        # Update sigma: linear decay for first 60% of epochs, then hold at min
+        s_max = args.sigma_max if args.sigma_max is not None else SIGMA_MAX
+        s_min = args.sigma_min if args.sigma_min is not None else SIGMA_MIN
+        shrink_epochs = int(args.epochs * 0.6)
+        if epoch <= shrink_epochs:
+            progress = (epoch - 1) / max(shrink_epochs - 1, 1)
+            current_sigma = s_max - (s_max - s_min) * progress
+        else:
+            current_sigma = s_min
+        # Update on the underlying dataset (handles random_split wrapper)
+        ds = train_ds.dataset if hasattr(train_ds, 'dataset') else train_ds
+        ds.sigma = current_sigma
+        val_base = val_ds.dataset if hasattr(val_ds, 'dataset') else val_ds
+        val_base.sigma = current_sigma
 
         # Warmup
         if epoch <= args.warmup_epochs:
@@ -511,8 +570,15 @@ def main():
                 else:
                     pg["lr"] = args.lr * warmup_factor
 
-        train_loss = train_epoch(model, train_loader, optimizer, device, epoch)
-        val_loss, val_pck5, val_pck10 = validate(model, val_loader, device)
+        train_loss = train_epoch(model, train_loader, optimizer, device, epoch,
+                                 channel_weights=channel_weights_tensor)
+
+        # Compute expensive detection score every 10 epochs (or first/last)
+        do_detection = (epoch % 10 == 0) or (epoch <= 2) or (epoch == args.epochs)
+        val_loss, val_precision, val_recall = validate(
+            model, val_loader, device, compute_detection=do_detection,
+            channel_weights=channel_weights_tensor,
+        )
 
         if epoch > args.warmup_epochs:
             scheduler.step()
@@ -520,33 +586,52 @@ def main():
         elapsed = time.time() - t0
         lr_head = optimizer.param_groups[1]["lr"]
 
-        print(f"Epoch {epoch}/{args.epochs} ({elapsed:.1f}s): "
-              f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}, "
-              f"PCK@5={val_pck5:.3f}, PCK@10={val_pck10:.3f}, lr={lr_head:.2e}")
+        if val_precision is not None:
+            print(f"Epoch {epoch}/{args.epochs} ({elapsed:.1f}s): "
+                  f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}, "
+                  f"precision={val_precision:.3f}, recall={val_recall:.3f}, "
+                  f"sigma={current_sigma:.2f}, lr={lr_head:.2e}")
+        else:
+            print(f"Epoch {epoch}/{args.epochs} ({elapsed:.1f}s): "
+                  f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}, "
+                  f"sigma={current_sigma:.2f}, lr={lr_head:.2e}")
 
         # Logging
         if args.wandb and HAS_WANDB:
-            wandb.log({
+            log_dict = {
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
-                "val_pck5": val_pck5,
-                "val_pck10": val_pck10,
                 "lr": lr_head,
-            })
+            }
+            if val_precision is not None:
+                log_dict["val_precision"] = val_precision
+                log_dict["val_recall"] = val_recall
+            wandb.log(log_dict)
 
-        # Save best model
-        if val_pck10 > best_pck10:
-            best_pck10 = val_pck10
+        # Save best model (optimize for recall when available, otherwise val_loss)
+        save_best = False
+        if val_recall is not None and val_recall > best_recall:
+            best_recall = val_recall
+            save_best = True
+        elif val_recall is None and val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_best = True
+
+        if save_best:
             patience_counter = 0
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "val_pck10": val_pck10,
+                "val_recall": val_recall if val_recall is not None else best_recall,
+                "val_precision": val_precision,
                 "val_loss": val_loss,
             }, os.path.join(args.output, "best.pth"))
-            print(f"  -> New best PCK@10: {val_pck10:.3f}")
+            if val_recall is not None:
+                print(f"  -> New best recall: {val_recall:.3f} (precision: {val_precision:.3f})")
+            else:
+                print(f"  -> New best val_loss: {val_loss:.6f}")
         else:
             patience_counter += 1
 
@@ -556,12 +641,12 @@ def main():
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "val_pck10": val_pck10,
+                "val_recall": val_recall,
                 "val_loss": val_loss,
             }, os.path.join(args.output, "last.pth"))
 
-        # Early stopping
-        if patience_counter >= args.patience:
+        # Early stopping (disabled with --no-early-stop or --patience 0)
+        if args.patience > 0 and not args.no_early_stop and patience_counter >= args.patience:
             print(f"Early stopping at epoch {epoch} (no improvement for {args.patience} epochs)")
             break
 
@@ -569,10 +654,10 @@ def main():
     torch.save({
         "epoch": epoch,
         "model_state_dict": model.state_dict(),
-        "val_pck10": val_pck10,
+        "val_recall": val_recall,
     }, os.path.join(args.output, "last.pth"))
 
-    print(f"\nDone. Best PCK@10: {best_pck10:.3f}")
+    print(f"\nDone. Best recall: {best_recall:.3f}")
     print(f"Weights saved to {args.output}/best.pth")
 
     if args.wandb and HAS_WANDB:

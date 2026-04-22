@@ -27,7 +27,7 @@ import subprocess
 import sys
 import time
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ENV_FILE = os.path.join(PROJECT_ROOT, ".env")
 POD_STATE_FILE = os.path.join(PROJECT_ROOT, ".runpod_pod.json")
 
@@ -154,31 +154,54 @@ def wait_for_pod(rp, pod_id, gpu_type, timeout_sec=600, container_timeout_sec=12
 
 
 def create_pod(args):
-    """Create a new RunPod GPU pod."""
+    """Create a new RunPod GPU pod.
+
+    Auto-terminates the pod on boot failure so we don't leak billing on
+    stuck Docker image pulls. Retries up to --create-retries times for
+    stuck-host cases.
+    """
     rp = init_runpod()
+
+    cloud_type = getattr(args, 'cloud_type', 'ALL')
+    retries = getattr(args, 'create_retries', 3)
 
     print(f"Creating RunPod pod...")
     print(f"  GPU: {args.gpu_type}")
     print(f"  GPU count: {args.gpu_count}")
     print(f"  Disk: {args.disk_size}GB")
+    print(f"  Cloud type: {cloud_type}")
     print()
 
-    pod = rp.create_pod(
-        name="all22-rfdetr-training",
-        image_name="runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04",
-        gpu_type_id=args.gpu_type,
-        gpu_count=args.gpu_count,
-        volume_in_gb=0,
-        container_disk_in_gb=args.disk_size,
-        ports="22/tcp",
-        start_ssh=True,
-    )
+    for attempt in range(1, retries + 1):
+        pod = rp.create_pod(
+            name=f"all22-{args.training_type}-training",
+            image_name="runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04",
+            gpu_type_id=args.gpu_type,
+            gpu_count=args.gpu_count,
+            volume_in_gb=0,
+            container_disk_in_gb=args.disk_size,
+            ports="22/tcp",
+            start_ssh=True,
+            cloud_type=cloud_type,
+        )
 
-    pod_id = pod["id"]
-    print(f"Pod created: {pod_id}")
-    save_pod_state({"id": pod_id, "gpu": args.gpu_type})
+        pod_id = pod["id"]
+        print(f"[attempt {attempt}/{retries}] Pod created: {pod_id}")
+        save_pod_state({"id": pod_id, "gpu": args.gpu_type})
 
-    return wait_for_pod(rp, pod_id, args.gpu_type)
+        info = wait_for_pod(rp, pod_id, args.gpu_type)
+        if info is not None:
+            return info
+
+        # Boot failed. Terminate this pod before retrying.
+        print(f"  [attempt {attempt}] boot failed — terminating pod {pod_id}")
+        try:
+            rp.terminate_pod(pod_id)
+        except Exception as e:
+            print(f"  WARNING: terminate failed: {e}")
+
+    print(f"All {retries} attempts failed.")
+    return None
 
 
 def upload_dataset(args):
@@ -203,9 +226,13 @@ def upload_dataset(args):
 
     print(f"Uploading to pod...")
 
-    # Upload training script
-    train_script = os.path.join(PROJECT_ROOT, "scripts", "train_rfdetr.py")
-    requirements = os.path.join(PROJECT_ROOT, "scripts", "requirements_runpod.txt")
+    # Upload training script — pick based on training type
+    if getattr(args, 'training_type', 'rfdetr') == 'hrnet':
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_hrnet_keypoints.py")
+        requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_hrnet_runpod.txt")
+    else:
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_rfdetr.py")
+        requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_runpod.txt")
 
     print("  Uploading training script...")
     subprocess.run(
@@ -213,13 +240,39 @@ def upload_dataset(args):
         check=True,
     )
 
-    # Upload dataset as tarball (much faster than scp -r with many small files)
+    # Upload dataset as tarball (much faster than scp -r with many small files).
+    # For HRNet fine-tuning, only pack the train/ and valid/ subdirectories so
+    # we don't ship along unrelated sibling folders (annotation_images, etc.).
+    # Use a temp staging dir so the archive contains just {dataset_name}/train,
+    # {dataset_name}/valid — avoids needing GNU-specific tar --transform.
+    import tempfile
     print(f"  Packing dataset...")
     tar_path = os.path.join(PROJECT_ROOT, ".dataset_upload.tar.gz")
-    subprocess.run(
-        ["tar", "-czf", tar_path, "-C", os.path.dirname(dataset_dir), os.path.basename(dataset_dir)],
-        check=True,
-    )
+    dataset_name = os.path.basename(dataset_dir)
+    has_split = os.path.isdir(os.path.join(dataset_dir, "train")) and \
+                os.path.isdir(os.path.join(dataset_dir, "valid"))
+    if getattr(args, 'training_type', 'rfdetr') == 'hrnet' and has_split:
+        with tempfile.TemporaryDirectory() as staging:
+            stage_root = os.path.join(staging, dataset_name)
+            os.makedirs(stage_root)
+            # Symlinks are cheap and tar follows them by default
+            os.symlink(os.path.join(dataset_dir, "train"),
+                       os.path.join(stage_root, "train"))
+            os.symlink(os.path.join(dataset_dir, "valid"),
+                       os.path.join(stage_root, "valid"))
+            subprocess.run(
+                ["tar", "-czhf", tar_path,  # -h follows symlinks
+                 "-C", staging,
+                 dataset_name],
+                check=True,
+            )
+    else:
+        subprocess.run(
+            ["tar", "-czf", tar_path,
+             "-C", os.path.dirname(dataset_dir),
+             dataset_name],
+            check=True,
+        )
     tar_size_mb = os.path.getsize(tar_path) / 1024 / 1024
     print(f"  Uploading dataset ({tar_size_mb:.0f}MB tarball)...")
     subprocess.run(
@@ -233,13 +286,29 @@ def upload_dataset(args):
         check=True,
     )
 
+    # Upload resume checkpoint if provided (HRNet only)
+    resume_path = getattr(args, 'resume', None)
+    if resume_path:
+        if not os.path.isabs(resume_path):
+            resume_path = os.path.join(PROJECT_ROOT, resume_path)
+        if not os.path.exists(resume_path):
+            print(f"ERROR: Resume checkpoint not found: {resume_path}")
+            sys.exit(1)
+        size_mb = os.path.getsize(resume_path) / 1024 / 1024
+        print(f"  Uploading resume checkpoint ({size_mb:.0f}MB)...")
+        subprocess.run(
+            ["scp"] + scp_opts + [resume_path, f"{ssh_target}:/workspace/resume.pth"],
+            check=True,
+        )
+
     # Install dependencies
+    req_filename = "requirements_hrnet_runpod.txt" if getattr(args, 'training_type', 'rfdetr') == 'hrnet' else "requirements_runpod.txt"
     print("  Installing dependencies (this can take a few minutes)...")
     proc = subprocess.Popen(
         ["ssh"] + ssh_opts + [ssh_target,
          "cd /workspace && python -m venv venv --system-site-packages"
          " && source venv/bin/activate"
-         " && pip install -r requirements_runpod.txt"],
+         f" && pip install -r {req_filename}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -273,20 +342,54 @@ def run_training(args):
     ssh_target = f"{ssh_user}@{ssh_host}"
     ssh_opts = ["-o", "StrictHostKeyChecking=no", "-p", str(ssh_port)]
 
-    train_args = (
-        f" --dataset dataset"
-        f" --epochs {args.epochs}"
-        f" --batch-size {args.batch_size}"
-        f" --grad-accum {args.grad_accum}"
-        f" --resolution {args.resolution}"
-        f" --devices {args.gpu_count}"
-    )
+    if getattr(args, 'training_type', 'rfdetr') == 'hrnet':
+        # Detect whether the uploaded dataset has a train/valid split layout
+        # (real-data fine-tuning) or a single-directory layout (synthetic).
+        dataset_basename = os.path.basename(os.path.abspath(args.dataset).rstrip(os.sep))
+        has_split = os.path.isdir(os.path.join(args.dataset, "train")) and \
+                    os.path.isdir(os.path.join(args.dataset, "valid"))
 
-    if args.gpu_count > 1:
-        train_args += " --strategy ddp"
-        train_cmd = f"cd /workspace && source venv/bin/activate && python -m torch.distributed.run --nproc_per_node={args.gpu_count} train_rfdetr.py{train_args}"
+        if has_split:
+            train_args = (
+                f" --dataset {dataset_basename}/train"
+                f" --val-dataset {dataset_basename}/valid"
+            )
+        else:
+            train_args = f" --dataset {dataset_basename}"
+
+        train_args += (
+            f" --epochs {args.epochs}"
+            f" --batch-size {args.batch_size}"
+            f" --lr {getattr(args, 'lr', 1e-3)}"
+            f" --backbone-lr-mult {getattr(args, 'backbone_lr_mult', 0.1)}"
+            f" --output /workspace/output"
+        )
+        if getattr(args, 'no_pretrained', False):
+            train_args += " --no-pretrained"
+        if getattr(args, 'resume', None):
+            # Resume weights are uploaded to /workspace/resume.pth
+            train_args += " --resume /workspace/resume.pth"
+        if getattr(args, 'sigma_max', None) is not None:
+            train_args += f" --sigma-max {args.sigma_max}"
+        if getattr(args, 'sigma_min', None) is not None:
+            train_args += f" --sigma-min {args.sigma_min}"
+        if getattr(args, 'channel_weights', None):
+            train_args += f" --channel-weights {args.channel_weights}"
+        train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_hrnet_keypoints.py{train_args}"
     else:
-        train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_rfdetr.py{train_args}"
+        train_args = (
+            f" --dataset dataset"
+            f" --epochs {args.epochs}"
+            f" --batch-size {args.batch_size}"
+            f" --grad-accum {args.grad_accum}"
+            f" --resolution {args.resolution}"
+            f" --devices {args.gpu_count}"
+        )
+        if args.gpu_count > 1:
+            train_args += " --strategy ddp"
+            train_cmd = f"cd /workspace && source venv/bin/activate && python -m torch.distributed.run --nproc_per_node={args.gpu_count} train_rfdetr.py{train_args}"
+        else:
+            train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_rfdetr.py{train_args}"
 
     # Wrap in nohup so training survives SSH disconnect
     detached_cmd = f"nohup bash -c '{train_cmd}' > /workspace/train.log 2>&1 &"
@@ -303,8 +406,9 @@ def run_training(args):
 
     # Brief pause, then verify the process started
     time.sleep(3)
+    script_name = "train_hrnet_keypoints.py" if getattr(args, 'training_type', 'rfdetr') == 'hrnet' else "train_rfdetr.py"
     result = subprocess.run(
-        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f train_rfdetr.py"],
+        ["ssh"] + ssh_opts + [ssh_target, f"pgrep -f {script_name}"],
         capture_output=True, text=True,
     )
     if result.returncode == 0:
@@ -338,9 +442,9 @@ def check_training(args=None):
     ssh_target = f"{ssh_user}@{ssh_host}"
     ssh_opts = ["-o", "StrictHostKeyChecking=no", "-p", str(ssh_port)]
 
-    # Check if training is still running
+    # Check if training is still running (match either training script)
     proc_check = subprocess.run(
-        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f train_rfdetr.py"],
+        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f 'train_(rfdetr|hrnet_keypoints)\\.py'"],
         capture_output=True, text=True,
     )
     is_running = proc_check.returncode == 0
@@ -401,10 +505,20 @@ def download_weights(args):
     output_dir = os.path.join(PROJECT_ROOT, "models")
     os.makedirs(output_dir, exist_ok=True)
 
-    print("Downloading trained weights...")
-    for weight_file in ["best.pt", "last.pt"]:
+    training_type = getattr(args, 'training_type', 'rfdetr')
+    if training_type == "hrnet":
+        weight_files = ["best.pth", "last.pth"]
+        prefix = "hrnet"
+        ext = ".pth"
+    else:
+        weight_files = ["best.pt", "last.pt"]
+        prefix = "rfdetr"
+        ext = ".pt"
+
+    print(f"Downloading {training_type} weights...")
+    for weight_file in weight_files:
         remote_path = f"/workspace/output/{weight_file}"
-        local_path = os.path.join(output_dir, f"rfdetr_{weight_file}")
+        local_path = os.path.join(output_dir, f"{prefix}_{weight_file}")
         try:
             subprocess.run(
                 ["scp"] + scp_opts + [f"{ssh_target}:{remote_path}", local_path],
@@ -521,19 +635,57 @@ def main():
     parser.add_argument("--check-training", action="store_true", help="Check training progress from log file")
 
     # Pod config
+    parser.add_argument("--cloud-type", default="SECURE",
+                        choices=["SECURE", "COMMUNITY", "ALL"],
+                        help="SECURE = dedicated GPU (no contention, slightly pricier, "
+                             "but avoids OOMs and stuck-host issues). COMMUNITY = "
+                             "consumer hosts, cheaper but unreliable. ALL = either.")
+    parser.add_argument("--create-retries", type=int, default=3,
+                        help="Retry pod creation this many times on boot failure.")
     parser.add_argument("--gpu-type", default="NVIDIA GeForce RTX 5090",
                         help="GPU type (default: NVIDIA GeForce RTX 5090)")
     parser.add_argument("--gpu-count", type=int, default=1, help="Number of GPUs (default: 1)")
     parser.add_argument("--disk-size", type=int, default=50, help="Container disk size in GB (default: 50)")
 
     # Training config
-    parser.add_argument("--dataset", default="dataset", help="Local path to COCO dataset")
-    parser.add_argument("--epochs", type=int, default=50, help="Training epochs (default: 50)")
-    parser.add_argument("--batch-size", type=int, default=4, help="Batch size per GPU (default: 4)")
-    parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation (default: 4)")
-    parser.add_argument("--resolution", type=int, default=1280, help="Input resolution (default: 1280)")
+    parser.add_argument("--training-type", default="rfdetr", choices=["rfdetr", "hrnet"],
+                        help="Model to train (default: rfdetr)")
+    parser.add_argument("--dataset", default=None, help="Local path to dataset (auto-set per training type)")
+    parser.add_argument("--epochs", type=int, default=None, help="Training epochs")
+    parser.add_argument("--batch-size", type=int, default=None, help="Batch size per GPU")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate (HRNet only)")
+    parser.add_argument("--backbone-lr-mult", type=float, default=0.1, help="Backbone LR multiplier (HRNet only)")
+    parser.add_argument("--no-pretrained", action="store_true", help="Don't use pretrained backbone (HRNet only)")
+    parser.add_argument("--resume", default=None,
+                        help="Local path to checkpoint to resume from (HRNet only). "
+                             "Will be uploaded to /workspace/resume.pth on the pod.")
+    parser.add_argument("--sigma-max", type=float, default=None,
+                        help="Starting heatmap sigma (HRNet only). Set equal to --sigma-min to hold tight.")
+    parser.add_argument("--sigma-min", type=float, default=None,
+                        help="Final heatmap sigma (HRNet only).")
+    parser.add_argument("--channel-weights", default=None,
+                        help="Comma-separated per-channel loss weights (HRNet only), e.g. '3,1'.")
+    # RF-DETR specific
+    parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation (RF-DETR only)")
+    parser.add_argument("--resolution", type=int, default=1280, help="Input resolution (RF-DETR only)")
 
     args = parser.parse_args()
+
+    # Set defaults based on training type
+    if args.training_type == "hrnet":
+        if args.dataset is None:
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "field_keypoints")
+        if args.epochs is None:
+            args.epochs = 100
+        if args.batch_size is None:
+            args.batch_size = 16
+    else:
+        if args.dataset is None:
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "player_detection")
+        if args.epochs is None:
+            args.epochs = 50
+        if args.batch_size is None:
+            args.batch_size = 4
 
     # Handle individual actions
     if args.status:

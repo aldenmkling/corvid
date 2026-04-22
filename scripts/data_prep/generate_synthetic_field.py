@@ -27,9 +27,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.homography.keypoint_schema import (
-    KEYPOINTS, NUM_KEYPOINTS, FIELD_COORDS, KEYPOINT_NAMES,
-    KEYPOINTS_BY_TYPE, NUM_IDENTITY_KEYPOINTS,
-    get_visible_keypoints,
+    FIELD_POINTS, NUM_FIELD_POINTS, FIELD_COORDS, POINT_CHANNELS,
+    NUM_CHANNELS, CHANNEL_NAMES,
+    get_visible_points,
 )
 from src.homography.field_model import (
     FIELD_LENGTH, FIELD_WIDTH, GOAL_LINE_LEFT, GOAL_LINE_RIGHT,
@@ -42,13 +42,21 @@ from src.homography.field_model import (
 
 # Template resolution: ~40 pixels per yard
 PX_PER_YARD = 40
-TEMPLATE_W = int(FIELD_LENGTH * PX_PER_YARD)   # 4800
-TEMPLATE_H = int(FIELD_WIDTH * PX_PER_YARD)    # 2133
 
 # Line widths in pixels (4 inches = 1/9 yard)
 LINE_W = max(2, int(PX_PER_YARD / 9))  # ~4px
-# Sidelines: 6 feet wide = 2 yards. At 40px/yard = 80px, scale down but keep prominent
-SIDELINE_W = 32  # clearly thicker than yard lines (~4px), includes back of endzone
+# Sidelines/end lines: 6 feet wide = 2 yards. Scaled down for visual clarity.
+SIDELINE_W = 32  # px, painted OUTSIDE the field boundary
+
+# Margin: just enough for boundary paint (sits outside the field)
+MARGIN_PX = SIDELINE_W + 4  # boundary paint + a few pixels of padding
+TEMPLATE_W = int(FIELD_LENGTH * PX_PER_YARD) + 2 * MARGIN_PX
+TEMPLATE_H = int(FIELD_WIDTH * PX_PER_YARD) + 2 * MARGIN_PX
+
+# Offset: top-left of the playing field in template pixel coordinates
+# All field content is drawn at (MARGIN_PX + x*PX_PER_YARD, MARGIN_PX + y*PX_PER_YARD)
+FIELD_OFFSET_X = MARGIN_PX
+FIELD_OFFSET_Y = MARGIN_PX
 
 # Hash mark dimensions: 2 feet long = 2/3 yard, 4 inches wide
 HASH_LEN = max(4, int(PX_PER_YARD * 2 / 3))  # ~27px
@@ -65,9 +73,9 @@ FRAME_H = 720
 # ── Field template rendering ────────────────────────────────────────────────
 
 def _yard_to_px(x_yard: float, y_yard: float) -> tuple[int, int]:
-    """Convert field yards to template pixel coordinates."""
-    px = int(x_yard * PX_PER_YARD)
-    py = int(y_yard * PX_PER_YARD)
+    """Convert field yards to template pixel coordinates (with margin offset)."""
+    px = FIELD_OFFSET_X + int(x_yard * PX_PER_YARD)
+    py = FIELD_OFFSET_Y + int(y_yard * PX_PER_YARD)
     return px, py
 
 
@@ -201,171 +209,166 @@ def render_field_template(rng: np.random.Generator | None = None) -> np.ndarray:
     if rng is None:
         rng = np.random.default_rng(42)
 
-    # Base: green grass — vary the base tone per template
+    # Base: out-of-bounds green, slightly different from field
     img = np.zeros((TEMPLATE_H, TEMPLATE_W, 3), dtype=np.uint8)
+    oob_green = np.array([30, 90, 35], dtype=np.uint8)  # darker out-of-bounds
+    img[:] = oob_green
+
+    # Field grass — vary the base tone per template
     base_green = np.array([
         35 + rng.integers(-5, 10),   # B
         110 + rng.integers(-15, 20),  # G
         40 + rng.integers(-5, 10),   # R
     ], dtype=np.uint8)
 
-    # Line paint color — not always pure white, can be slightly off-white
-    white_val = 240 + rng.integers(0, 16)  # 240-255
+    # Line paint color
+    white_val = 240 + rng.integers(0, 16)
     white = (int(white_val), int(white_val), int(white_val))
 
-    # Alternating stripe pattern (mow lines every 5 yards)
+    # Helper: field yard coords to template pixels
+    def yx(x_yd, y_yd):
+        return _yard_to_px(x_yd, y_yd)
+
+    # ── Fill playing field with grass stripes ────────────────────────
+    field_top = FIELD_OFFSET_Y
+    field_bot = FIELD_OFFSET_Y + int(FIELD_WIDTH * PX_PER_YARD)
     for i, x in enumerate(YARD_LINE_POSITIONS):
-        x_px = int(x * PX_PER_YARD)
+        x_px = _yard_to_px(x, 0)[0]
         if i + 1 < len(YARD_LINE_POSITIONS):
-            next_x_px = int(YARD_LINE_POSITIONS[i + 1] * PX_PER_YARD)
+            next_x_px = _yard_to_px(YARD_LINE_POSITIONS[i + 1], 0)[0]
         else:
-            next_x_px = TEMPLATE_W
+            next_x_px = _yard_to_px(FIELD_LENGTH, 0)[0]
 
-        if i % 2 == 0:
-            stripe_color = base_green
-        else:
-            stripe_color = base_green + np.array([5, 10, 5], dtype=np.uint8)
+        stripe = base_green if i % 2 == 0 else base_green + np.array([5, 10, 5], dtype=np.uint8)
+        img[field_top:field_bot, x_px:next_x_px] = stripe
 
-        img[:, x_px:next_x_px] = stripe_color
+    # ── End zones ────────────────────────────────────────────────────
+    left_goal_px = yx(GOAL_LINE_LEFT, 0)[0]
+    right_goal_px = yx(GOAL_LINE_RIGHT, 0)[0]
+    left_end_px = yx(0, 0)[0]
+    right_end_px = yx(FIELD_LENGTH, 0)[0]
 
-    # Fill end zones — same color both sides, randomly sampled
-    left_goal_px = int(GOAL_LINE_LEFT * PX_PER_YARD)
-    right_goal_px = int(GOAL_LINE_RIGHT * PX_PER_YARD)
-
-    # Random endzone color (team color, saturated)
     ez_hue = rng.integers(0, 180)
     ez_bgr = cv2.cvtColor(np.array([[[ez_hue, 200, 80]]], dtype=np.uint8),
                            cv2.COLOR_HSV2BGR)[0, 0]
     ez_color = tuple(int(c) for c in ez_bgr)
-    img[:, :left_goal_px] = ez_color
-    img[:, right_goal_px:] = ez_color
+    img[field_top:field_bot, left_end_px:left_goal_px] = ez_color
+    img[field_top:field_bot, right_goal_px:right_end_px] = ez_color
 
-    # Random team name (5-7 uppercase letters)
+    # End zone text
     name_len = rng.integers(5, 8)
     ez_text = "".join(chr(c) for c in rng.integers(65, 91, size=name_len))
-
     ez_font = cv2.FONT_HERSHEY_DUPLEX
     ez_scale = 5.0
     ez_thick = 16
     (tw, th), _ = cv2.getTextSize(ez_text, ez_font, ez_scale, ez_thick)
-
-    # Left endzone: rotated 90° CW, reads across the endzone from near sideline
     ez_canvas = np.zeros((th + 20, tw + 20), dtype=np.uint8)
     cv2.putText(ez_canvas, ez_text, (10, th + 10), ez_font, ez_scale, 255, ez_thick)
     ez_rotated = cv2.rotate(ez_canvas, cv2.ROTATE_90_CLOCKWISE)
-    _paste_canvas(img, ez_rotated, int(5 * PX_PER_YARD), TEMPLATE_H // 2)
-
-    # Right endzone: rotated opposite direction (reads backwards from near side)
+    _paste_canvas(img, ez_rotated, *yx(5, FIELD_WIDTH / 2))
     ez_rotated_r = cv2.rotate(ez_canvas, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    _paste_canvas(img, ez_rotated_r, int(115 * PX_PER_YARD), TEMPLATE_H // 2)
+    _paste_canvas(img, ez_rotated_r, *yx(115, FIELD_WIDTH / 2))
 
-    # Midfield logo: large colored oval between the hashes at midfield
-    # Drawn BEFORE lines so yard lines render on top
-    mid_px = int(60 * PX_PER_YARD)
+    # Midfield logo
     logo_color = tuple(int(min(255, c + 40)) for c in ez_bgr)
-    logo_rx = int(PX_PER_YARD * 4)  # ~4 yards wide radius
-    logo_ry = int(PX_PER_YARD * 3)  # ~3 yards tall radius
-    cv2.ellipse(img, (mid_px, TEMPLATE_H // 2),
-                (logo_rx, logo_ry), 0, 0, 360, logo_color, -1)
+    cv2.ellipse(img, yx(60, FIELD_WIDTH / 2),
+                (int(PX_PER_YARD * 4), int(PX_PER_YARD * 3)),
+                0, 0, 360, logo_color, -1)
 
-    # ── Boundary lines: thick white border around entire field ──────
-    # Sidelines (top and bottom)
-    cv2.line(img, (0, SIDELINE_W // 2), (TEMPLATE_W, SIDELINE_W // 2),
-             white, SIDELINE_W)
-    cv2.line(img, (0, TEMPLATE_H - SIDELINE_W // 2),
-             (TEMPLATE_W, TEMPLATE_H - SIDELINE_W // 2), white, SIDELINE_W)
-    # End lines (left and right) — same thickness as sidelines
-    cv2.line(img, (SIDELINE_W // 2, 0), (SIDELINE_W // 2, TEMPLATE_H),
-             white, SIDELINE_W)
-    cv2.line(img, (TEMPLATE_W - SIDELINE_W // 2, 0),
-             (TEMPLATE_W - SIDELINE_W // 2, TEMPLATE_H), white, SIDELINE_W)
+    # ── Boundary lines: painted OUTSIDE the playing surface ──────────
+    # Inner edge aligns with field boundary. Paint extends outward.
+    near_sl_y = yx(0, 0)[1] - SIDELINE_W // 2  # center of near sideline paint
+    far_sl_y = yx(0, FIELD_WIDTH)[1] + SIDELINE_W // 2
+    left_el_x = yx(0, 0)[0] - SIDELINE_W // 2
+    right_el_x = yx(FIELD_LENGTH, 0)[0] + SIDELINE_W // 2
+
+    # Sidelines span from left end line to right end line (not full template)
+    sl_left = left_el_x - SIDELINE_W // 2
+    sl_right = right_el_x + SIDELINE_W // 2
+    cv2.line(img, (sl_left, near_sl_y), (sl_right, near_sl_y), white, SIDELINE_W)
+    cv2.line(img, (sl_left, far_sl_y), (sl_right, far_sl_y), white, SIDELINE_W)
+    # End lines span from near sideline to far sideline
+    el_top = near_sl_y - SIDELINE_W // 2
+    el_bot = far_sl_y + SIDELINE_W // 2
+    cv2.line(img, (left_el_x, el_top), (left_el_x, el_bot), white, SIDELINE_W)
+    cv2.line(img, (right_el_x, el_top), (right_el_x, el_bot), white, SIDELINE_W)
 
     # ── Goal lines ───────────────────────────────────────────────────
-    cv2.line(img, (left_goal_px, 0), (left_goal_px, TEMPLATE_H), white, LINE_W + 2)
-    cv2.line(img, (right_goal_px, 0), (right_goal_px, TEMPLATE_H), white, LINE_W + 2)
+    cv2.line(img, (left_goal_px, field_top), (left_goal_px, field_bot), white, LINE_W + 2)
+    cv2.line(img, (right_goal_px, field_top), (right_goal_px, field_bot), white, LINE_W + 2)
 
-    # ── Yard lines (every 5 yards) ──────────────────────────────────
+    # ── Yard lines (every 5 yards, between goal lines) ───────────────
     for x in YARD_LINE_POSITIONS:
         if x == GOAL_LINE_LEFT or x == GOAL_LINE_RIGHT:
             continue
-        px_x = int(x * PX_PER_YARD)
-        cv2.line(img, (px_x, 0), (px_x, TEMPLATE_H), white, LINE_W)
+        px_x = yx(x, 0)[0]
+        cv2.line(img, (px_x, field_top), (px_x, field_bot), white, LINE_W)
 
     # ── Hash marks ──────────────────────────────────────────────────
-    near_hash_py = int(HASH_Y_NEAR * PX_PER_YARD)
-    far_hash_py = int(HASH_Y_FAR * PX_PER_YARD)
+    near_hash_py = yx(0, HASH_Y_NEAR)[1]
+    far_hash_py = yx(0, HASH_Y_FAR)[1]
 
-    # Hash spacing: 18.5 feet = 6.167 yards apart (inside edge to inside edge)
-    # The crosses at 5-yard lines sit on the INSIDE edges of the two hash rows
-    # Near hash crosses: at near_hash_py (inside edge of near hash row)
-    # Far hash crosses: at far_hash_py (inside edge of far hash row)
-
-    # At 5-yard lines: horizontal cross marks (parallel to sidelines)
-    # These sit on the yard lines at the hash mark y-positions
+    # At 5-yard lines: horizontal crosses (no hashes on goal lines)
     for x in YARD_LINE_POSITIONS:
-        px_x = int(x * PX_PER_YARD)
-        # Near hash cross: horizontal dash on the inside (field-side) of near hash
+        if x == GOAL_LINE_LEFT or x == GOAL_LINE_RIGHT:
+            continue
+        px_x = yx(x, 0)[0]
         cv2.line(img, (px_x - HASH_LEN // 2, near_hash_py),
                  (px_x + HASH_LEN // 2, near_hash_py), white, HASH_W)
-        # Far hash cross: horizontal dash on the inside (field-side) of far hash
         cv2.line(img, (px_x - HASH_LEN // 2, far_hash_py),
                  (px_x + HASH_LEN // 2, far_hash_py), white, HASH_W)
 
-    # Between 5-yard lines at 1-yard intervals: vertical dashes
-    # (perpendicular to sidelines) at both hash positions
+    # Between 5-yard lines: 1-yard vertical dashes
     for i in range(len(YARD_LINE_POSITIONS) - 1):
         x_start = YARD_LINE_POSITIONS[i]
         for yd in range(1, 5):
             x = x_start + yd
             if x > GOAL_LINE_RIGHT:
                 break
-            px_x = int(x * PX_PER_YARD)
-            # Near hash - vertical dash centered on hash y
+            px_x = yx(x, 0)[0]
             cv2.line(img, (px_x, near_hash_py - HASH_LEN // 4),
                      (px_x, near_hash_py + HASH_LEN // 4), white, max(2, HASH_W // 2))
-            # Far hash - vertical dash
             cv2.line(img, (px_x, far_hash_py - HASH_LEN // 4),
                      (px_x, far_hash_py + HASH_LEN // 4), white, max(2, HASH_W // 2))
 
     # ── 1-yard sideline tick marks ──────────────────────────────────
-    # Short marks along each sideline at every yard
-    tick_len = max(3, int(PX_PER_YARD * 0.3))  # ~12px
+    tick_len = max(3, int(PX_PER_YARD * 0.3))
+    near_sl_inner = yx(0, 0)[1]  # inner edge of near sideline
+    far_sl_inner = yx(0, FIELD_WIDTH)[1]  # inner edge of far sideline
     for yard in range(int(GOAL_LINE_LEFT), int(GOAL_LINE_RIGHT) + 1):
-        px_x = int(yard * PX_PER_YARD)
-        # Near sideline tick (pointing inward from sideline)
-        cv2.line(img, (px_x, SIDELINE_W), (px_x, SIDELINE_W + tick_len),
+        px_x = yx(yard, 0)[0]
+        # Near sideline tick (pointing inward from inner edge)
+        cv2.line(img, (px_x, near_sl_inner), (px_x, near_sl_inner + tick_len),
                  white, max(1, LINE_W // 2))
         # Far sideline tick
-        cv2.line(img, (px_x, TEMPLATE_H - SIDELINE_W),
-                 (px_x, TEMPLATE_H - SIDELINE_W - tick_len),
+        cv2.line(img, (px_x, far_sl_inner), (px_x, far_sl_inner - tick_len),
                  white, max(1, LINE_W // 2))
 
     # ── Painted numbers ─────────────────────────────────────────────
-    near_num_py = int(NUMBER_Y_NEAR * PX_PER_YARD)
-    far_num_py = int(NUMBER_Y_FAR * PX_PER_YARD)
+    near_num_py = yx(0, NUMBER_Y_NEAR)[1]
+    far_num_py = yx(0, NUMBER_Y_FAR)[1]
 
     from src.homography.field_model import ngs_x_to_field_number
 
     # Draw all numbers first
     for x in TEN_YARD_POSITIONS:
-        px_x = int(x * PX_PER_YARD)
+        px_x = yx(x, 0)[0]
         num = ngs_x_to_field_number(x)
         _draw_number(img, num, px_x, near_num_py, side="near")
         _draw_number(img, num, px_x, far_num_py, side="far")
 
     # Draw arrows AFTER numbers so they aren't covered
     for x in TEN_YARD_POSITIONS:
-        px_x = int(x * PX_PER_YARD)
+        px_x = yx(x, 0)[0]
         num = ngs_x_to_field_number(x)
         if num < 50:
             is_left_half = (x <= 60)
-            arrow_x_offset = int(PX_PER_YARD * 2.8)  # must clear the widest digit + gap
+            arrow_x_offset = int(PX_PER_YARD * 2.8)
             if is_left_half:
                 arrow_x = px_x - arrow_x_offset
             else:
                 arrow_x = px_x + arrow_x_offset
 
-            # Arrow y: toward midfield (the "top" of the number)
             near_arrow_y = near_num_py + int(PX_PER_YARD * 0.4)
             far_arrow_y = far_num_py - int(PX_PER_YARD * 0.4)
 
@@ -465,34 +468,34 @@ def sample_camera_pose(rng: np.random.Generator, endzone_shot: bool = False) -> 
     Returns:
         dict with camera parameters for _camera_to_homography()
     """
-    # Camera position: near sideline, roughly midfield, elevated
+    # Camera position: press box level, midfield, elevated
     cam_x = 60.0 + rng.uniform(-10, 10)  # near midfield, ±10 yards
-    cam_y = -8.0 + rng.uniform(-2, 2)    # behind near sideline, ~8 yards back
-    cam_z = 22.0 + rng.uniform(-3, 3)    # ~57-75 feet up (steeper downward look)
+    cam_y = -15.0 + rng.uniform(-3, 3)   # ~36-54 feet behind sideline
+    cam_z = 30.0 + rng.uniform(-4, 4)    # ~78-102 feet up
 
-    # Focal length first (needed to determine target_y variation)
-    # Range covers wide pre-snap (~1100) to tight end-of-play zoom (~2500)
-    if endzone_shot:
-        focal_length = rng.uniform(1200, 2500)
-    else:
-        focal_length = rng.uniform(1100, 2200)
-
-    # Target x: where along the field the camera is looking
+    # Target x first (focal length depends on pan distance)
     if endzone_shot:
         target_x = rng.choice([15.0, 105.0]) + rng.uniform(-5, 5)
     else:
         target_x = rng.uniform(15, 105)
 
-    # Target y: generally mid-field, biased slightly toward far sideline
-    # so wide views show a bit more past the far sideline than near.
-    # Tighter zoom allows more y variation (can focus near either sideline).
-    # Must always target somewhere on the field.
-    base_y = FIELD_WIDTH * 0.55  # ~29 yards, slightly past center toward far sideline
-    if focal_length > 1400:
-        jitter = rng.uniform(-12, 12)
+    # Pan distance: how far from midfield we're looking
+    pan_dist = abs(target_x - cam_x)  # 0 = straight ahead, ~50 = toward endzone
+
+    # Focal length: base range + boost for more panned shots
+    pan_boost = pan_dist * 8
+    if endzone_shot:
+        focal_length = rng.uniform(1000 + pan_boost, 4200 + pan_boost)
     else:
-        jitter = rng.uniform(-5, 5)
-    target_y = np.clip(base_y + jitter, 3.0, FIELD_WIDTH - 3.0)
+        focal_length = rng.uniform(800 + pan_boost * 0.5, 3800 + pan_boost * 0.5)
+
+    # Target y: centered on the field, no bias
+    base_y = FIELD_WIDTH * 0.5  # true center = ~26.7 yards
+    if focal_length > 3000:
+        jitter = rng.uniform(-10, 10)
+    else:
+        jitter = rng.uniform(-4, 4)
+    target_y = np.clip(base_y + jitter, 5.0, FIELD_WIDTH - 5.0)
 
     return {
         "cam_x": cam_x,
@@ -509,6 +512,7 @@ def sample_camera_pose(rng: np.random.Generator, endzone_shot: bool = False) -> 
 def apply_domain_randomization(
     frame: np.ndarray,
     rng: np.random.Generator,
+    focal_length: float = 2500,
 ) -> np.ndarray:
     """Apply random augmentations to make synthetic frames more realistic."""
     h, w = frame.shape[:2]
@@ -541,17 +545,17 @@ def apply_domain_randomization(
     hsv = np.clip(hsv, 0, 255).astype(np.uint8)
     frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
-    # ── Player-like occlusions (more realistic sizing) ───────────
-    # NFL players from All-22 overhead: roughly 15-25px wide, 25-45px tall
-    # Clustered near the middle of the field (line of scrimmage area)
+    # ── Player-like occlusions (scale with zoom level) ────────────
+    # At wide zoom (~1500 fl), players are small (~12-20px wide)
+    # At tight zoom (~4000 fl), players are larger (~25-50px wide)
+    zoom_scale = np.clip(focal_length / 2500, 0.6, 2.0)
     n_players = rng.integers(15, 30)
-    # Cluster center: roughly middle 60% of frame
     cluster_cx = w // 2 + rng.integers(-w // 4, w // 4)
     cluster_cy = h // 2 + rng.integers(-h // 6, h // 6)
 
     for _ in range(n_players):
-        pw = rng.integers(12, 28)
-        ph = rng.integers(20, 45)
+        pw = rng.integers(int(12 * zoom_scale), int(28 * zoom_scale) + 1)
+        ph = rng.integers(int(20 * zoom_scale), int(45 * zoom_scale) + 1)
         # Players cluster around the action with some spread
         px = int(cluster_cx + rng.normal(0, w * 0.15))
         py = int(cluster_cy + rng.normal(0, h * 0.12))
@@ -638,14 +642,13 @@ def generate_frame(
     template: np.ndarray,
     rng: np.random.Generator,
     endzone_shot: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, list[dict]]:
     """Generate one synthetic training frame.
 
     Returns:
-        (frame, pixel_coords, visibility)
+        (frame, points)
         frame: (720, 1280, 3) BGR image
-        pixel_coords: (110, 2) pixel positions of all keypoints
-        visibility: (110,) int array, 0=not visible, 2=visible
+        points: list of {"x": px, "y": py, "channel": 0-2, "visible": bool}
     """
     pose = sample_camera_pose(rng, endzone_shot=endzone_shot)
     H = _camera_to_homography(**pose)
@@ -653,45 +656,36 @@ def generate_frame(
     # Warp template to camera view
     frame = cv2.warpPerspective(template, H, (FRAME_W, FRAME_H),
                                  borderMode=cv2.BORDER_CONSTANT,
-                                 borderValue=(1, 1, 1))  # near-black sentinel
+                                 borderValue=(1, 1, 1))
 
-    # Transform keypoint field coordinates to pixel coordinates
-    field_px = FIELD_COORDS * PX_PER_YARD  # (110, 2)
+    # Transform field points to pixel coordinates
+    field_px = FIELD_COORDS * PX_PER_YARD + np.array([FIELD_OFFSET_X, FIELD_OFFSET_Y])
 
-    ones = np.ones((NUM_KEYPOINTS, 1))
-    pts_h = np.hstack([field_px, ones])  # (110, 3)
-    projected = (H @ pts_h.T).T  # (110, 3)
+    ones = np.ones((NUM_FIELD_POINTS, 1))
+    pts_h = np.hstack([field_px, ones])
+    projected = (H @ pts_h.T).T
     projected[:, 0] /= projected[:, 2]
     projected[:, 1] /= projected[:, 2]
-    pixel_coords = projected[:, :2]  # (110, 2)
+    pixel_coords = projected[:, :2]
 
-    # Determine visibility for identity keypoints (0-105)
-    visible = get_visible_keypoints(pixel_coords, FRAME_W, FRAME_H, margin=5.0)
-    visibility = np.where(visible, 2, 0).astype(np.int32)
+    # Determine visibility
+    visible = get_visible_points(pixel_coords, FRAME_W, FRAME_H, margin=5.0)
 
-    # Category keypoints (106-109): visible if ANY identity keypoint of that
-    # type is visible. Position set to first visible identity keypoint of type.
-    # (Training script generates multi-peak heatmaps from identity keypoints.)
-    category_type_map = {
-        106: "near_sideline",
-        107: "near_hash",
-        108: "far_hash",
-        109: "far_sideline",
-    }
-    for cat_id, cat_type in category_type_map.items():
-        # Find visible identity keypoints of this type
-        type_kps = KEYPOINTS_BY_TYPE.get(cat_type, [])
-        for kp in type_kps:
-            kid = kp["id"]
-            if kid < NUM_IDENTITY_KEYPOINTS and visibility[kid] > 0:
-                pixel_coords[cat_id] = pixel_coords[kid]
-                visibility[cat_id] = 2
-                break  # just need one position for COCO format
+    # Build point list with channel assignments
+    points = []
+    for i in range(NUM_FIELD_POINTS):
+        points.append({
+            "x": float(pixel_coords[i, 0]),
+            "y": float(pixel_coords[i, 1]),
+            "channel": int(POINT_CHANNELS[i]),
+            "visible": bool(visible[i]),
+            "name": FIELD_POINTS[i]["name"],
+        })
 
     # Apply domain randomization
-    frame = apply_domain_randomization(frame, rng)
+    frame = apply_domain_randomization(frame, rng, focal_length=pose["focal_length"])
 
-    return frame, pixel_coords, visibility
+    return frame, points
 
 
 # ── COCO export ──────────────────────────────────────────────────────────────
@@ -776,7 +770,7 @@ def main():
                         help="Generate 10 frames and save preview, don't make full dataset")
     args = parser.parse_args()
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    project_root = _PROJECT_ROOT
     output_dir = os.path.join(project_root, args.output) if not os.path.isabs(args.output) else args.output
 
     rng = np.random.default_rng(args.seed)
@@ -805,35 +799,28 @@ def main():
         for i in range(10):
             endzone = (i >= 8)  # last 2 are endzone shots
             template = templates[i % len(templates)]
-            frame, pixel_coords, visibility = generate_frame(template, rng, endzone)
+            frame, points = generate_frame(template, rng, endzone)
 
             # Draw keypoints on frame for visualization
             viz = frame.copy()
-            for ki in range(NUM_KEYPOINTS):
-                if visibility[ki] > 0:
-                    x, y = int(pixel_coords[ki, 0]), int(pixel_coords[ki, 1])
-                    kp = KEYPOINTS[ki]
-                    # Color by type
-                    colors = {
-                        "near_sideline": (0, 0, 255),
-                        "near_hash": (0, 255, 0),
-                        "far_hash": (255, 0, 0),
-                        "far_sideline": (0, 255, 255),
-                        "near_number": (255, 0, 255),
-                        "far_number": (255, 128, 255),
-                        "endzone_corner": (0, 165, 255),
-                    }
-                    color = colors.get(kp["type"], (255, 255, 255))
+            channel_colors = {
+                0: (0, 0, 255),    # sideline = red
+                1: (0, 255, 0),    # hash = green
+                2: (255, 0, 255),  # number = magenta
+            }
+            n_vis = 0
+            for p in points:
+                if p["visible"]:
+                    x, y = int(p["x"]), int(p["y"])
+                    color = channel_colors.get(p["channel"], (255, 255, 255))
                     cv2.circle(viz, (x, y), 5, color, -1)
                     cv2.circle(viz, (x, y), 5, (255, 255, 255), 1)
-
-                    # Label with short name
-                    label = kp["name"][:8]
+                    label = p["name"][:12]
                     cv2.putText(viz, label, (x + 6, y - 3),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
+                    n_vis += 1
 
-            n_vis = int(np.sum(visibility > 0))
-            cv2.putText(viz, f"Frame {i} | {n_vis} keypoints | {'ENDZONE' if endzone else 'normal'}",
+            cv2.putText(viz, f"Frame {i} | {n_vis} points | {'ENDZONE' if endzone else 'normal'}",
                         (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
             cv2.imwrite(os.path.join(preview_dir, f"preview_{i:02d}.jpg"), viz)
@@ -842,18 +829,55 @@ def main():
         return
 
     print(f"\nGenerating {args.num_frames} synthetic frames...")
-    frames = []
+    img_dir = os.path.join(output_dir, "images")
+    os.makedirs(img_dir, exist_ok=True)
+
+    # Write frames incrementally to avoid OOM
+    images_meta = []
+    annotations = []
+    recent_vis = []
+
     for i in range(args.num_frames):
         endzone = rng.random() < args.endzone_pct
         template = templates[i % len(templates)]
-        frame, pixel_coords, visibility = generate_frame(template, rng, endzone)
-        frames.append((frame, pixel_coords, visibility))
+        frame, points = generate_frame(template, rng, endzone)
 
+        # Write image to disk immediately
+        fname = f"synthetic_{i:05d}.jpg"
+        cv2.imwrite(os.path.join(img_dir, fname), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+        images_meta.append({"id": i, "file_name": fname, "width": FRAME_W, "height": FRAME_H})
+
+        # Annotation: list of visible points with channel assignments
+        visible_points = [
+            {"x": p["x"], "y": p["y"], "channel": p["channel"], "visible": p["visible"]}
+            for p in points
+        ]
+        n_visible = sum(1 for p in points if p["visible"])
+
+        annotations.append({
+            "id": i, "image_id": i,
+            "points": visible_points,
+            "num_visible": n_visible,
+        })
+
+        recent_vis.append(n_visible)
         if (i + 1) % 500 == 0:
-            n_vis = int(np.mean([np.sum(v > 0) for _, _, v in frames[-500:]]))
-            print(f"  {i + 1}/{args.num_frames} frames ({n_vis:.0f} avg visible keypoints)")
+            avg = int(np.mean(recent_vis[-500:]))
+            print(f"  {i + 1}/{args.num_frames} frames ({avg} avg visible points)")
 
-    save_coco_dataset(output_dir, frames)
+    # Write annotations
+    ann_data = {
+        "images": images_meta,
+        "annotations": annotations,
+        "channels": CHANNEL_NAMES,
+    }
+    ann_path = os.path.join(output_dir, "annotations.json")
+    with open(ann_path, "w") as f:
+        json.dump(ann_data, f)
+
+    print(f"Saved {args.num_frames} frames to {img_dir}")
+    print(f"Annotations: {ann_path}")
     print("Done!")
 
 

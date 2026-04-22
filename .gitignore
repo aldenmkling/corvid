@@ -40,6 +40,9 @@ data/field_keypoints/synthetic/
 data/field_keypoints/annotation_images/
 data/field_keypoints/train/
 data/field_keypoints/valid/
+# AL rounds: track label JSONs + manifests, ignore the bulk JPEG folders
+data/field_keypoints/al_round*/candidates/
+data/field_keypoints/al_round*/images/
 
 # Output (generated images, tracking results)
 output/

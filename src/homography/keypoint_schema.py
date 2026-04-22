@@ -1,211 +1,126 @@
 """
 Field keypoint schema for HRNet-based homography.
 
-Defines 106 semantically labeled keypoints on an NFL football field.
-Each keypoint has a unique integer ID and known real-world field coordinates
-in the NGS coordinate system (x: 0-120, y: 0-53.33).
+The model outputs 2 heatmap channels, each detecting ALL instances of a
+feature type:
+  0: sideline_intersection — where any yard line crosses either sideline
+  1: hash_intersection — any hash mark cross (near or far)
 
-Keypoint types:
-  - Yard-line intersections (84): 21 yard lines × 4 types
-    (near_sideline, near_hash, far_hash, far_sideline)
-  - Painted numbers (18): 9 positions × 2 sides (near, far)
-  - End zone corners (4): back-of-endzone end line corners
+Each channel has MULTIPLE peaks per frame (one per visible instance).
+Identity (which yard line, which side) is resolved downstream by:
+  - Grid spacing analysis (regular 5-yard intervals)
+  - Temporal tracking
 
-The model outputs one heatmap channel per keypoint. On any given frame,
-most channels will be zero (keypoint not visible). This is expected and
-mirrors how pose estimation handles occluded joints.
+Number detection is handled separately (not part of the heatmap model).
+
+The schema also defines all individual field points for ground truth
+generation and homography computation.
 """
 
 import numpy as np
 from .field_model import (
     YARD_LINE_POSITIONS,
-    TEN_YARD_POSITIONS,
     FIELD_WIDTH,
-    FIELD_LENGTH,
+    GOAL_LINE_LEFT,
+    GOAL_LINE_RIGHT,
     HASH_Y_NEAR,
     HASH_Y_FAR,
-    NUMBER_Y_NEAR,
-    NUMBER_Y_FAR,
 )
 
 
-# ── Schema constants ────────────────────────────────────────────────────────
+# ── Model output channels ──────────────────────────────────────────────────
 
-# 106 identity-specific keypoints + 4 generic category keypoints = 110 total
-NUM_KEYPOINTS = 110
-NUM_IDENTITY_KEYPOINTS = 106  # IDs 0-105: specific yard line identity
-NUM_CATEGORY_KEYPOINTS = 4   # IDs 106-109: generic type (fires for ANY yard line)
+NUM_CHANNELS = 2  # model output heatmap channels
 
-# Intersection types and their y-coordinates
+CHANNEL_SIDELINE = 0     # yard line × sideline intersections (both near and far)
+CHANNEL_HASH = 1         # hash mark crosses (both near and far)
+
+CHANNEL_NAMES = ["sideline_intersection", "hash_intersection"]
+
+
+# ── Field point definitions ─────────────────────────────────────────────────
+# These define every identifiable point on the field with its real-world
+# coordinates and which heatmap channel it belongs to.
+
+# Intersection types: (type_name, y_coordinate, channel_id)
 INTERSECTION_TYPES = [
-    ("near_sideline", 0.0),
-    ("near_hash", HASH_Y_NEAR),
-    ("far_hash", HASH_Y_FAR),
-    ("far_sideline", FIELD_WIDTH),
+    ("near_sideline", 0.0, CHANNEL_SIDELINE),
+    ("near_hash", HASH_Y_NEAR, CHANNEL_HASH),
+    ("far_hash", HASH_Y_FAR, CHANNEL_HASH),
+    ("far_sideline", FIELD_WIDTH, CHANNEL_SIDELINE),
 ]
 
-# Number types and their y-coordinates
-NUMBER_TYPES = [
-    ("near_number", NUMBER_Y_NEAR),
-    ("far_number", NUMBER_Y_FAR),
-]
+def _build_field_points() -> list[dict]:
+    """Build the complete list of field points.
 
+    Each point has: name, field_xy, type, channel, yard_line_x.
+    """
+    points = []
 
-# ── Build keypoint list ─────────────────────────────────────────────────────
-
-def _build_keypoints() -> list[dict]:
-    """Build the full 106-keypoint schema."""
-    keypoints = []
-    kp_id = 0
-
-    # 84 yard-line intersection keypoints (IDs 0-83)
-    for yl_idx, x in enumerate(YARD_LINE_POSITIONS):
-        for type_idx, (type_name, y) in enumerate(INTERSECTION_TYPES):
-            keypoints.append({
-                "id": kp_id,
+    # Yard-line intersections (no hashes on goal lines)
+    for x in YARD_LINE_POSITIONS:
+        is_goal_line = (x == GOAL_LINE_LEFT or x == GOAL_LINE_RIGHT)
+        for type_name, y, channel in INTERSECTION_TYPES:
+            if is_goal_line and "hash" in type_name:
+                continue
+            points.append({
                 "name": f"{int(x)}_{type_name}",
                 "field_xy": (float(x), float(y)),
                 "type": type_name,
+                "channel": channel,
                 "yard_line_x": float(x),
             })
-            kp_id += 1
 
-    # 18 painted number keypoints (IDs 84-101)
-    for num_idx, x in enumerate(TEN_YARD_POSITIONS):
-        for side_idx, (type_name, y) in enumerate(NUMBER_TYPES):
-            keypoints.append({
-                "id": kp_id,
-                "name": f"{int(x)}_{type_name}",
-                "field_xy": (float(x), float(y)),
-                "type": type_name,
-                "yard_line_x": float(x),
-            })
-            kp_id += 1
-
-    # 4 end zone corner keypoints (IDs 102-105)
-    endzone_corners = [
-        ("left_endline_near", 0.0, 0.0),
-        ("left_endline_far", 0.0, FIELD_WIDTH),
-        ("right_endline_near", FIELD_LENGTH, 0.0),
-        ("right_endline_far", FIELD_LENGTH, FIELD_WIDTH),
-    ]
-    for name, x, y in endzone_corners:
-        keypoints.append({
-            "id": kp_id,
-            "name": name,
-            "field_xy": (float(x), float(y)),
-            "type": "endzone_corner",
-            "yard_line_x": float(x),
-        })
-        kp_id += 1
-
-    # 4 generic category keypoints (IDs 106-109)
-    # These fire for ANY yard line of the given type — used when the model
-    # can detect an intersection but can't tell which yard line it is
-    # (e.g., tight zoom, no numbers visible). The tracker resolves identity.
-    # field_xy is set to (0, y) as a placeholder — the actual x comes from
-    # the detected position, not the schema.
-    category_types = [
-        ("any_near_sideline", 0.0),
-        ("any_near_hash", HASH_Y_NEAR),
-        ("any_far_hash", HASH_Y_FAR),
-        ("any_far_sideline", FIELD_WIDTH),
-    ]
-    for name, y in category_types:
-        keypoints.append({
-            "id": kp_id,
-            "name": name,
-            "field_xy": (0.0, float(y)),  # x is unknown, resolved by tracker
-            "type": "category",
-            "yard_line_x": 0.0,
-        })
-        kp_id += 1
-
-    assert len(keypoints) == NUM_KEYPOINTS
-    return keypoints
+    return points
 
 
 # ── Module-level exports ────────────────────────────────────────────────────
 
-KEYPOINTS: list[dict] = _build_keypoints()
+FIELD_POINTS: list[dict] = _build_field_points()
+NUM_FIELD_POINTS = len(FIELD_POINTS)
 
-# Ordered name list (index = keypoint ID)
-KEYPOINT_NAMES: list[str] = [kp["name"] for kp in KEYPOINTS]
+# Field coordinates array for all points
+FIELD_COORDS: np.ndarray = np.array(
+    [p["field_xy"] for p in FIELD_POINTS], dtype=np.float64
+)
 
-# (110, 2) array of field coordinates, indexed by keypoint ID
-# Note: category keypoints (106-109) have x=0 placeholder — actual x resolved by tracker
-FIELD_COORDS: np.ndarray = np.array([kp["field_xy"] for kp in KEYPOINTS], dtype=np.float64)
+# Channel assignment for each field point
+POINT_CHANNELS: np.ndarray = np.array(
+    [p["channel"] for p in FIELD_POINTS], dtype=np.int32
+)
 
-# Lookup dicts
-ID_BY_NAME: dict[str, int] = {kp["name"]: kp["id"] for kp in KEYPOINTS}
-NAME_BY_ID: dict[int, str] = {kp["id"]: kp["name"] for kp in KEYPOINTS}
+# Group field points by channel
+POINTS_BY_CHANNEL: dict[int, list[dict]] = {}
+for p in FIELD_POINTS:
+    POINTS_BY_CHANNEL.setdefault(p["channel"], []).append(p)
 
-# Group keypoints by type
-KEYPOINTS_BY_TYPE: dict[str, list[dict]] = {}
-for kp in KEYPOINTS:
-    KEYPOINTS_BY_TYPE.setdefault(kp["type"], []).append(kp)
+# Group by type
+POINTS_BY_TYPE: dict[str, list[dict]] = {}
+for p in FIELD_POINTS:
+    POINTS_BY_TYPE.setdefault(p["type"], []).append(p)
 
-
-# ── Horizontal flip mapping ────────────────────────────────────────────────
-
-def _build_flip_mapping() -> dict[int, int]:
-    """Build keypoint ID remapping for horizontal flip augmentation.
-
-    Horizontal flip swaps left and right halves of the field:
-    NGS x ↔ (FIELD_LENGTH - x). near/far stays the same.
-
-    Returns dict mapping old_id → new_id after flip.
-    """
-    name_to_id = ID_BY_NAME
-    mapping = {}
-
-    for kp in KEYPOINTS:
-        kp_id = kp["id"]
-        x, y = kp["field_xy"]
-        flipped_x = FIELD_LENGTH - x
-        kp_type = kp["type"]
-
-        if kp_type == "endzone_corner":
-            # Swap left ↔ right endzone corners
-            name = kp["name"]
-            if "left" in name:
-                flipped_name = name.replace("left", "right")
-            else:
-                flipped_name = name.replace("right", "left")
-            mapping[kp_id] = name_to_id[flipped_name]
-        else:
-            # Swap x coordinate, keep type
-            flipped_name = f"{int(flipped_x)}_{kp_type}"
-            if flipped_name in name_to_id:
-                mapping[kp_id] = name_to_id[flipped_name]
-            else:
-                # No corresponding keypoint (shouldn't happen with symmetric schema)
-                mapping[kp_id] = kp_id
-
-    return mapping
-
-
-FLIP_MAPPING: dict[int, int] = _build_flip_mapping()
+# Lookup
+NAME_TO_POINT: dict[str, dict] = {p["name"]: p for p in FIELD_POINTS}
 
 
 # ── Utility functions ───────────────────────────────────────────────────────
 
-def get_visible_keypoints(
+def get_visible_points(
     pixel_coords: np.ndarray,
     frame_w: int,
     frame_h: int,
     margin: float = 0.0,
 ) -> np.ndarray:
-    """Return boolean mask of keypoints within frame bounds.
+    """Return boolean mask of field points within frame bounds.
 
     Args:
-        pixel_coords: (106, 2) pixel positions of all keypoints
+        pixel_coords: (N, 2) pixel positions of field points
         frame_w: frame width in pixels
         frame_h: frame height in pixels
         margin: pixels of margin inside frame edge
 
     Returns:
-        (106,) boolean array, True if keypoint is within frame
+        (N,) boolean array
     """
     x = pixel_coords[:, 0]
     y = pixel_coords[:, 1]
