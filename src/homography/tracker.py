@@ -287,7 +287,12 @@ class HomographyTracker:
         delta_max_translation_px: float = DELTA_MAX_TRANSLATION_PX,
         delta_max_scale_change: float = DELTA_MAX_SCALE_CHANGE,
         use_track_bank: bool = True,
-        track_bank_coast: bool = True,
+        track_bank_coast: bool = False,     # default off: coasting introduces
+                                             # a feedback loop where
+                                             # H_prev-drift → coasted points
+                                             # pull H_cur toward the drift →
+                                             # runaway slanting. Validation is
+                                             # the useful half of the bank.
     ):
         self.device = device
         self.hash_thresh = hash_conf_thresh

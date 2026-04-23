@@ -94,7 +94,9 @@ def show_first_frame(clip_path: str, out_path: str):
 
 def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
                  fps_override: float = None, use_track_bank: bool = True,
-                 smooth_window: int = 0, smooth_poly: int = 2):
+                 bank_coast: bool = False,   # default off: see tracker.py note
+                 smooth_window: int = 0, smooth_poly: int = 2,
+                 device: str = "cpu"):
     """Run tracker on every frame, warp each to top-down, write as MP4.
 
     If smooth_window > 0: run in two passes. Pass 1 runs tracker + caches
@@ -119,7 +121,9 @@ def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
     os.makedirs(os.path.dirname(output_mp4), exist_ok=True)
     writer = cv2.VideoWriter(output_mp4, fourcc, fps, (out_w, out_h))
 
-    tracker = HomographyTracker(WEIGHTS, use_track_bank=use_track_bank)
+    tracker = HomographyTracker(WEIGHTS, device=device,
+                                use_track_bank=use_track_bank,
+                                track_bank_coast=bank_coast)
 
     # Flip y so near sideline is at bottom
     S = np.array([[1.0 / YD_PER_PX, 0, 0],
@@ -165,15 +169,124 @@ def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
 
         cached_frames.append(frame_u)
         raw_Hs.append(result.H.copy())
+        # Cache the keypoints actually used in this frame's homography solve,
+        # in UNDISTORTED pixel space (same space as frame_u).
         meta.append({
             "method": result.method,
             "n": result.n_correspondences,
             "err": (result.field_reproj_error_mean
                     if result.field_reproj_error_mean == result.field_reproj_error_mean
                     else None),
+            "pixel_pts_u": (result.pixel_pts_u.copy()
+                            if result.pixel_pts_u is not None
+                            and len(result.pixel_pts_u) > 0 else None),
+            "field_pts": (result.field_pts.copy()
+                          if result.field_pts is not None
+                          and len(result.field_pts) > 0 else None),
         })
     cap.release()
     print(f"  pass 1 done: cached {len(cached_frames)} frames")
+
+    # ── Carry imputation ──
+    # Carry mode copies H_prev, which is wasteful — we have future frames too.
+    # For each carry frame, if it's bracketed by good frames within a small
+    # gap, linearly interpolate H. Remaining real-carry frames = unrecoverable
+    # (end-of-clip failure).
+    CARRY_IMPUTE_MAX_GAP = 8  # frames — interpolate across gaps up to this size
+
+    def _is_good_for_impute(i):
+        m = meta[i]
+        return m["method"] in ("full", "delta")
+
+    n_imputed = 0
+    for i in range(len(meta)):
+        if meta[i]["method"] != "carry":
+            continue
+        j_before = i - 1
+        while j_before >= 0 and not _is_good_for_impute(j_before):
+            j_before -= 1
+        j_after = i + 1
+        while j_after < len(meta) and not _is_good_for_impute(j_after):
+            j_after += 1
+        if j_before < 0 or j_after >= len(meta):
+            continue  # no bracket on one side
+        if (j_after - j_before) > CARRY_IMPUTE_MAX_GAP:
+            continue  # gap too wide to trust interpolation
+        alpha = (i - j_before) / float(j_after - j_before)
+        # Linear interp on normalized H entries
+        hA = raw_Hs[j_before]
+        hB = raw_Hs[j_after]
+        sa = hA[2, 2] if abs(hA[2, 2]) > 1e-9 else 1.0
+        sb = hB[2, 2] if abs(hB[2, 2]) > 1e-9 else 1.0
+        h_interp = (1 - alpha) * (hA / sa) + alpha * (hB / sb)
+        h_interp = h_interp * ((1 - alpha) * sa + alpha * sb)
+        raw_Hs[i] = h_interp
+        meta[i]["imputed"] = True
+        n_imputed += 1
+    if n_imputed:
+        print(f"  carry imputation: replaced {n_imputed} frames via neighbor interp")
+
+    # ── Err-based similarity fallback ──
+    # For frames where err spikes (i.e. the full-H fit is internally inconsistent
+    # and/or badly constrained), REPLACE the raw H with a similarity update from
+    # the nearest preceding "good" frame. Similarity = 4 DOF (scale, rotation,
+    # translation), can't express the projective slanting that high-err frames
+    # usually exhibit.
+    errs_arr = np.array([m["err"] if m["err"] is not None else np.nan
+                         for m in meta])
+    full_errs = errs_arr[[m["method"] == "full" for m in meta]]
+    finite_full = full_errs[np.isfinite(full_errs)]
+    if len(finite_full) > 5:
+        baseline_err = float(np.median(finite_full))
+    else:
+        baseline_err = 0.12
+    bad_threshold = max(0.25, 2.5 * baseline_err)
+    print(f"  err baseline={baseline_err:.3f} yd, bad_threshold={bad_threshold:.3f} yd")
+
+    n_replaced = 0
+    for i in range(len(meta)):
+        e = meta[i]["err"]
+        m = meta[i]
+        if m["method"] != "full":
+            continue
+        if e is None or not np.isfinite(e) or e <= bad_threshold:
+            continue
+        # Find nearest preceding good frame
+        j = i - 1
+        while j >= 0:
+            ej = meta[j]["err"]
+            if (meta[j]["method"] == "full" and ej is not None
+                    and np.isfinite(ej) and ej <= bad_threshold):
+                break
+            j -= 1
+        if j < 0:
+            continue  # no good reference yet; skip
+        # Need current frame's correspondences to compute similarity update.
+        pix_i = m.get("pixel_pts_u")
+        fld_i = m.get("field_pts")
+        if pix_i is None or fld_i is None or len(pix_i) < 2:
+            continue
+        H_ref = raw_Hs[j]
+        H_ref_inv = np.linalg.inv(H_ref)
+        # Predict where these field points were in the reference frame (pixels)
+        prev_pix = []
+        for f in fld_i:
+            fh = np.array([f[0], f[1], 1.0])
+            p = H_ref_inv @ fh
+            prev_pix.append([p[0] / p[2], p[1] / p[2]])
+        prev_pix = np.array(prev_pix, dtype=np.float64)
+        # Fit similarity prev_pix → current pix
+        M, _ = cv2.estimateAffinePartial2D(
+            prev_pix, pix_i.astype(np.float64), method=cv2.LMEDS,
+        )
+        if M is None:
+            continue
+        S_mat = np.vstack([M, [0, 0, 1]])
+        raw_Hs[i] = H_ref @ np.linalg.inv(S_mat)
+        n_replaced += 1
+    if n_replaced:
+        print(f"  err-based similarity fallback replaced {n_replaced} frames "
+              f"(err > {bad_threshold:.2f} yd)")
 
     # ── Optional: Savitzky-Golay smoothing over H ──
     if smooth_window > 0 and len(raw_Hs) >= smooth_window:
@@ -194,8 +307,69 @@ def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
     else:
         Hs = raw_Hs
 
+    # ── Detect "clip lost" state retrospectively.
+    # Once we hit sustained loss (≥ MIN_SUSTAINED_LOSS consecutive real carries),
+    # the whole rest of the clip is LOST — even if detections come back later.
+    # Reason: H_prev has drifted during the lost window, and downstream grid_pos
+    # assignments depend on it, so "recovered" frames are anchored to a
+    # compromised reference.
+    MIN_SUSTAINED_LOSS = 3
+
+    def _real_carry(m):
+        return m["method"] == "carry" and not m.get("imputed")
+
+    is_lost = [False] * len(meta)
+    lost_from = None
+    consec_carry = 0
+    for i, m in enumerate(meta):
+        if _real_carry(m):
+            consec_carry += 1
+        else:
+            consec_carry = 0
+        if consec_carry >= MIN_SUSTAINED_LOSS:
+            lost_from = i - consec_carry + 1
+            break
+
+    if lost_from is not None:
+        for i in range(lost_from, len(meta)):
+            is_lost[i] = True
+        print(f"  clip LOST from frame {lost_from} "
+              f"({len(meta) - lost_from} frames) — first sustained loss")
+
+    # Freeze H at last good (non-lost) frame and reuse after lost starts.
+    frozen_H = None
+    if lost_from is not None and lost_from > 0:
+        frozen_H = Hs[lost_from - 1].copy()
+
     # ── Pass 2: render with (possibly smoothed) H ──
+    def _kind_color(fy):
+        """Color by keypoint kind (y in field coords)."""
+        if fy < 1.0:
+            return (255, 200, 80)    # sideline_near — cyan
+        if fy > FIELD_WIDTH - 1.0:
+            return (80, 200, 255)    # sideline_far — orange
+        if abs(fy - HASH_Y_FAR) < abs(fy - HASH_Y_NEAR):
+            return (80, 255, 80)     # far_hash — green
+        return (80, 80, 255)         # near_hash — red
+
     for i, (frame_u, H_use, m) in enumerate(zip(cached_frames, Hs, meta)):
+        # Draw the keypoints used in the homography on the source panel.
+        # These are in undistorted pixel space (matches frame_u).
+        frame_vis = frame_u.copy()
+        if (not is_lost[i] and m.get("pixel_pts_u") is not None
+                and m.get("field_pts") is not None):
+            for px, py, field_xy in zip(
+                m["pixel_pts_u"][:, 0], m["pixel_pts_u"][:, 1], m["field_pts"]
+            ):
+                color = _kind_color(float(field_xy[1]))
+                cv2.drawMarker(
+                    frame_vis, (int(px), int(py)), color,
+                    cv2.MARKER_CROSS, 14, 2,
+                )
+
+        # If clip is lost, freeze H and overlay "LOST" on rectified panel.
+        if is_lost[i] and frozen_H is not None:
+            H_use = frozen_H
         H_pixel_to_rect = S @ H_use
         rectified = cv2.warpPerspective(frame_u, H_pixel_to_rect, (field_w, field_h))
 
@@ -224,10 +398,20 @@ def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
             cv2.putText(rectified, f"err={m['err']:.2f}yd",
                         (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
+        if is_lost[i]:
+            # Big red "LOST" overlay across the rectified panel
+            overlay = rectified.copy()
+            cv2.rectangle(overlay, (0, 0), (field_w, field_h), (0, 0, 120), -1)
+            rectified = cv2.addWeighted(overlay, 0.45, rectified, 0.55, 0)
+            cv2.putText(rectified, "TRACKING LOST",
+                        (field_w // 2 - 180, field_h // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 3,
+                        cv2.LINE_AA)
+
         # Compose side-by-side, vertically centering each panel
         canvas = np.zeros((out_h, out_w, 3), dtype=np.uint8)
         y0_left = (out_h - h) // 2
-        canvas[y0_left:y0_left + h, :w] = frame_u
+        canvas[y0_left:y0_left + h, :w] = frame_vis
         y0_right = (out_h - field_h) // 2
         canvas[y0_right:y0_right + field_h, w:w + field_w] = rectified
 
@@ -252,10 +436,17 @@ def main():
                         help="Just render the first-frame anchor viz.")
     parser.add_argument("--no-track-bank", action="store_true",
                         help="Disable KeypointTrackBank (for A/B comparison).")
+    parser.add_argument("--bank-coast", action="store_true",
+                        help="Enable coasted correspondences from the track "
+                             "bank. Off by default — coasting can create "
+                             "a feedback loop with H_prev-drift.")
     parser.add_argument("--smooth-window", type=int, default=0,
                         help="Savitzky-Golay window (odd, e.g. 15) over H "
                              "matrix across frames. 0 = disabled.")
     parser.add_argument("--smooth-poly", type=int, default=2)
+    parser.add_argument("--device", default="cpu",
+                        choices=["cpu", "cuda", "mps"],
+                        help="Torch device for HRNet inference.")
     args = parser.parse_args()
 
     base = os.path.splitext(os.path.basename(args.clip))[0]
@@ -275,8 +466,10 @@ def main():
             OUTPUT_DIR, f"{tag}_rectified{suffix}.mp4")
         rectify_clip(args.clip, args.anchor, out,
                      use_track_bank=not args.no_track_bank,
+                     bank_coast=args.bank_coast,
                      smooth_window=args.smooth_window,
-                     smooth_poly=args.smooth_poly)
+                     smooth_poly=args.smooth_poly,
+                     device=args.device)
 
 
 if __name__ == "__main__":
