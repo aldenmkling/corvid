@@ -35,9 +35,8 @@ import numpy as np
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts", "testing"))
 
-from test_yard_line_grouping import (  # noqa: E402
+from src.homography.grid_solver import (  # noqa: E402
     run_hrnet, extract_peaks, build_yard_lines,
     HASH_THRESH, SIDELINE_THRESH,
 )

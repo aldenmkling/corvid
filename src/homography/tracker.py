@@ -34,7 +34,7 @@ import cv2
 import numpy as np
 
 from .apply_homography import pixel_to_field, field_to_pixel
-from .camera_model import CameraIntrinsics, undistort_points
+from .distortion import CameraIntrinsics, undistort_points
 from .field_model import (
     FIELD_LENGTH, FIELD_WIDTH, HASH_Y_NEAR, HASH_Y_FAR,
     YARD_LINE_POSITIONS,
@@ -43,17 +43,11 @@ from .keypoint_detector import FieldKeypointDetector
 from .keypoint_track_bank import (
     KeypointTrackBank, kind_from_field, snap_to_yard_slot,
 )
-
-# Grid-solver logic lives alongside the tests right now; importing directly.
-_TEST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))), "scripts", "testing")
-sys.path.insert(0, _TEST_DIR)
-from test_yard_line_grouping import (  # noqa: E402
+from .grid_solver import (
     split_hash_rows, pair_hashes, find_sideline_on_yard_line,
     assign_grid_positions, compute_hash_pca, _row_coord,
-    yardline_tilt_slope_from_pairs,
+    yardline_tilt_slope_from_pairs, calibrate_distortion_from_lines,
 )
-from test_grid_solver_camera import calibrate_distortion_from_lines  # noqa: E402
 
 
 # ── Constants ──────────────────────────────────────────────────────────────

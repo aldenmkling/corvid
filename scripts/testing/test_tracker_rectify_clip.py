@@ -21,7 +21,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, PROJECT_ROOT)
 
 from src.homography.tracker import HomographyTracker
-from src.homography.camera_model import undistort_points
+from src.homography.distortion import undistort_points
 from src.homography.field_model import (
     FIELD_LENGTH, FIELD_WIDTH, HASH_Y_NEAR, HASH_Y_FAR,
     YARD_LINE_POSITIONS,

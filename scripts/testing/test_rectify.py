@@ -13,21 +13,21 @@ import numpy as np
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
-from scripts.testing.test_grid_solver_camera import (
+from src.homography.grid_solver import (
     build_yard_line_groups, groups_to_correspondences,
     calibrate_distortion_from_lines,
 )
-from scripts.testing.test_yard_line_grouping import (
+from src.homography.grid_solver import (
     run_hrnet, extract_peaks,
 )
-from src.homography.camera_model import CameraIntrinsics, undistort_points
+from src.homography.distortion import CameraIntrinsics, undistort_points
 from src.homography.field_model import (
     YARD_LINE_POSITIONS, FIELD_WIDTH, FIELD_LENGTH,
     HASH_Y_NEAR, HASH_Y_FAR,
 )
 
 WEIGHTS = os.path.join(PROJECT_ROOT, "models", "hrnet_finetuned_last.pth")
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "camera_model_test")
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "homography_tests")
 HASH_THRESH = 0.40
 SIDELINE_THRESH = 0.30
 
