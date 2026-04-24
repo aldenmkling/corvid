@@ -46,7 +46,8 @@ except ImportError:
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-NUM_CHANNELS = 2      # sideline_intersection, hash_intersection
+NUM_CHANNELS = 2      # default (sideline + hash); override with --num-channels
+DEFAULT_BACKBONE = "hrnet_w48"  # override with --backbone (e.g. hrnet_w18)
 INPUT_H, INPUT_W = 512, 896
 HEATMAP_H, HEATMAP_W = 256, 448  # 1/2 resolution (HRNet stage 0 output)
 SIGMA_MAX = 6.0   # wide Gaussians early (easy to learn)
@@ -75,9 +76,11 @@ class FieldKeypointDataset(Dataset):
     Each channel can have MULTIPLE peaks (one per visible instance of that type).
     """
 
-    def __init__(self, data_dir: str, augment: bool = True):
+    def __init__(self, data_dir: str, augment: bool = True,
+                 num_channels: int = NUM_CHANNELS):
         self.data_dir = data_dir
         self.augment = augment
+        self.num_channels = num_channels
         self.sigma = SIGMA_MAX  # updated by training loop each epoch
 
         ann_path = os.path.join(data_dir, "annotations.json")
@@ -130,9 +133,9 @@ class FieldKeypointDataset(Dataset):
         if self.augment:
             img, scaled_points = self._augment(img, scaled_points)
 
-        # Generate multi-peak heatmaps (2 channels)
-        heatmaps = np.zeros((NUM_CHANNELS, HEATMAP_H, HEATMAP_W), dtype=np.float32)
-        channel_has_peaks = np.zeros(NUM_CHANNELS, dtype=np.float32)
+        # Generate multi-peak heatmaps
+        heatmaps = np.zeros((self.num_channels, HEATMAP_H, HEATMAP_W), dtype=np.float32)
+        channel_has_peaks = np.zeros(self.num_channels, dtype=np.float32)
 
         for p in scaled_points:
             hm_x = p["x"] * HEATMAP_W / INPUT_W
@@ -225,20 +228,26 @@ class FieldKeypointDataset(Dataset):
 # ── Model ────────────────────────────────────────────────────────────────────
 
 class HRNetKeypointModel(nn.Module):
-    """HRNet-W48 backbone + 2-channel heatmap head."""
+    """HRNet backbone + N-channel heatmap head.
 
-    def __init__(self, num_channels: int = NUM_CHANNELS, pretrained: bool = True):
+    Backbone is configurable (e.g. hrnet_w48 for 2-channel full model,
+    hrnet_w18 for hash-only downsized variant). Both share the same stem
+    output shape (64 channels at 1/2 resolution), so the head is identical.
+    """
+
+    def __init__(self, num_channels: int = NUM_CHANNELS, pretrained: bool = True,
+                 backbone: str = DEFAULT_BACKBONE):
         super().__init__()
         import timm
 
         self.backbone = timm.create_model(
-            "hrnet_w48",
+            backbone,
             pretrained=pretrained,
             features_only=True,
             out_indices=(0,),
         )
 
-        backbone_channels = 64  # HRNet-W48 stage 0
+        backbone_channels = 64  # HRNet W18/W32/W48 all have 64-channel stem out
 
         self.head = nn.Sequential(
             nn.Conv2d(backbone_channels, backbone_channels, 3, padding=1, bias=False),
@@ -443,6 +452,9 @@ def main():
     parser.add_argument("--warmup-epochs", type=int, default=5)
     parser.add_argument("--sigma-max", type=float, default=None, help="Starting sigma (default: SIGMA_MAX)")
     parser.add_argument("--sigma-min", type=float, default=None, help="Ending sigma (default: SIGMA_MIN)")
+    parser.add_argument("--sigma-shrink-epochs", type=int, default=None,
+                        help="Epochs over which sigma decays from max to min. "
+                             "Default: 60%% of --epochs. After this, sigma is held at min.")
     parser.add_argument("--channel-weights", type=str, default=None,
                         help="Comma-separated per-channel loss weights, e.g. '3,1' to upweight sidelines 3x. "
                              "Must match NUM_CHANNELS.")
@@ -454,6 +466,12 @@ def main():
     parser.add_argument("--wandb", action="store_true", help="Log to W&B")
     parser.add_argument("--no-pretrained", action="store_true",
                         help="Don't use ImageNet pretrained backbone")
+    parser.add_argument("--backbone", default=DEFAULT_BACKBONE,
+                        help="timm backbone name (hrnet_w48 default, "
+                             "hrnet_w18 for downsized hash-only variant)")
+    parser.add_argument("--num-channels", type=int, default=NUM_CHANNELS,
+                        help="Number of output heatmap channels. "
+                             "2 = sideline+hash (default), 1 = hash-only")
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -461,10 +479,12 @@ def main():
     print(f"Device: {device}")
 
     # Load datasets
-    train_ds = FieldKeypointDataset(args.dataset, augment=True)
+    train_ds = FieldKeypointDataset(args.dataset, augment=True,
+                                    num_channels=args.num_channels)
 
     if args.val_dataset:
-        val_ds = FieldKeypointDataset(args.val_dataset, augment=False)
+        val_ds = FieldKeypointDataset(args.val_dataset, augment=False,
+                                       num_channels=args.num_channels)
     else:
         # Split train into train/val (80/20)
         n_val = max(1, len(train_ds) // 5)
@@ -474,7 +494,8 @@ def main():
             generator=torch.Generator().manual_seed(42),
         )
         # Disable augmentation on val split
-        val_ds.dataset = FieldKeypointDataset(args.dataset, augment=False)
+        val_ds.dataset = FieldKeypointDataset(args.dataset, augment=False,
+                                               num_channels=args.num_channels)
         print(f"Split: {n_train} train, {n_val} val")
 
     train_loader = DataLoader(
@@ -488,8 +509,9 @@ def main():
 
     # Build model
     model = HRNetKeypointModel(
-        num_channels=NUM_CHANNELS,
+        num_channels=args.num_channels,
         pretrained=not args.no_pretrained,
+        backbone=args.backbone,
     ).to(device)
 
     # Load checkpoint if resuming
@@ -530,14 +552,15 @@ def main():
     channel_weights_tensor = None
     if args.channel_weights:
         weights_list = [float(w) for w in args.channel_weights.split(",")]
-        assert len(weights_list) == NUM_CHANNELS, \
-            f"Got {len(weights_list)} channel weights, need {NUM_CHANNELS}"
+        assert len(weights_list) == args.num_channels, \
+            f"Got {len(weights_list)} channel weights, need {args.num_channels}"
         channel_weights_tensor = torch.tensor(weights_list, dtype=torch.float32, device=device)
 
     print(f"\nTraining for {args.epochs} epochs...")
+    print(f"  Backbone: {args.backbone}")
     print(f"  LR: backbone={args.lr * args.backbone_lr_mult:.1e}, head={args.lr:.1e}")
     print(f"  Batch size: {args.batch_size}")
-    print(f"  Channels: {NUM_CHANNELS} (0=sideline, 1=hash)")
+    print(f"  Channels: {args.num_channels}")
     if channel_weights_tensor is not None:
         print(f"  Channel weights: {channel_weights_tensor.tolist()}")
     print(f"  Sigma: {SIGMA_MAX} -> {SIGMA_MIN} (shrinking over training)")
@@ -546,10 +569,13 @@ def main():
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
 
-        # Update sigma: linear decay for first 60% of epochs, then hold at min
+        # Update sigma: linear decay over --sigma-shrink-epochs (or 60% of
+        # --epochs by default), then hold at min.
         s_max = args.sigma_max if args.sigma_max is not None else SIGMA_MAX
         s_min = args.sigma_min if args.sigma_min is not None else SIGMA_MIN
-        shrink_epochs = int(args.epochs * 0.6)
+        shrink_epochs = (args.sigma_shrink_epochs
+                         if args.sigma_shrink_epochs is not None
+                         else int(args.epochs * 0.6))
         if epoch <= shrink_epochs:
             progress = (epoch - 1) / max(shrink_epochs - 1, 1)
             current_sigma = s_max - (s_max - s_min) * progress

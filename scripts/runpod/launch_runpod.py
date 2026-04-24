@@ -227,9 +227,13 @@ def upload_dataset(args):
     print(f"Uploading to pod...")
 
     # Upload training script — pick based on training type
-    if getattr(args, 'training_type', 'rfdetr') == 'hrnet':
+    tt = getattr(args, 'training_type', 'rfdetr')
+    if tt == 'hrnet':
         train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_hrnet_keypoints.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_hrnet_runpod.txt")
+    elif tt == 'unet':
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_unet_lines.py")
+        requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_unet_runpod.txt")
     else:
         train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_rfdetr.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_runpod.txt")
@@ -251,7 +255,11 @@ def upload_dataset(args):
     dataset_name = os.path.basename(dataset_dir)
     has_split = os.path.isdir(os.path.join(dataset_dir, "train")) and \
                 os.path.isdir(os.path.join(dataset_dir, "valid"))
-    if getattr(args, 'training_type', 'rfdetr') == 'hrnet' and has_split:
+    # COPYFILE_DISABLE=1 tells macOS bsdtar not to emit `._filename`
+    # AppleDouble sidecars, which otherwise pollute the extracted dataset on
+    # Linux and trip up any glob that matches `*.jpg` or `*.png`.
+    tar_env = {**os.environ, "COPYFILE_DISABLE": "1"}
+    if getattr(args, 'training_type', 'rfdetr') in ('hrnet', 'unet') and has_split:
         with tempfile.TemporaryDirectory() as staging:
             stage_root = os.path.join(staging, dataset_name)
             os.makedirs(stage_root)
@@ -264,6 +272,7 @@ def upload_dataset(args):
                 ["tar", "-czhf", tar_path,  # -h follows symlinks
                  "-C", staging,
                  dataset_name],
+                env=tar_env,
                 check=True,
             )
     else:
@@ -271,6 +280,7 @@ def upload_dataset(args):
             ["tar", "-czf", tar_path,
              "-C", os.path.dirname(dataset_dir),
              dataset_name],
+            env=tar_env,
             check=True,
         )
     tar_size_mb = os.path.getsize(tar_path) / 1024 / 1024
@@ -302,7 +312,11 @@ def upload_dataset(args):
         )
 
     # Install dependencies
-    req_filename = "requirements_hrnet_runpod.txt" if getattr(args, 'training_type', 'rfdetr') == 'hrnet' else "requirements_runpod.txt"
+    _tt = getattr(args, 'training_type', 'rfdetr')
+    req_filename = {
+        "hrnet": "requirements_hrnet_runpod.txt",
+        "unet":  "requirements_unet_runpod.txt",
+    }.get(_tt, "requirements_runpod.txt")
     print("  Installing dependencies (this can take a few minutes)...")
     proc = subprocess.Popen(
         ["ssh"] + ssh_opts + [ssh_target,
@@ -373,9 +387,31 @@ def run_training(args):
             train_args += f" --sigma-max {args.sigma_max}"
         if getattr(args, 'sigma_min', None) is not None:
             train_args += f" --sigma-min {args.sigma_min}"
+        if getattr(args, 'sigma_shrink_epochs', None) is not None:
+            train_args += f" --sigma-shrink-epochs {args.sigma_shrink_epochs}"
         if getattr(args, 'channel_weights', None):
             train_args += f" --channel-weights {args.channel_weights}"
+        if getattr(args, 'backbone', None):
+            train_args += f" --backbone {args.backbone}"
+        if getattr(args, 'num_channels', None) is not None:
+            train_args += f" --num-channels {args.num_channels}"
         train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_hrnet_keypoints.py{train_args}"
+    elif getattr(args, 'training_type', 'rfdetr') == 'unet':
+        dataset_basename = os.path.basename(os.path.abspath(args.dataset).rstrip(os.sep))
+        train_args = (
+            f" --dataset {dataset_basename}"
+            f" --epochs {args.epochs}"
+            f" --batch-size {args.batch_size}"
+            f" --lr {getattr(args, 'lr', 1e-3)}"
+            f" --encoder-lr-mult {getattr(args, 'backbone_lr_mult', 0.1)}"
+            f" --output /workspace/output"
+            f" --amp"
+        )
+        if getattr(args, 'encoder', None):
+            train_args += f" --encoder {args.encoder}"
+        if getattr(args, 'resume', None):
+            train_args += " --resume /workspace/resume.pth"
+        train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_unet_lines.py{train_args}"
     else:
         train_args = (
             f" --dataset dataset"
@@ -406,7 +442,11 @@ def run_training(args):
 
     # Brief pause, then verify the process started
     time.sleep(3)
-    script_name = "train_hrnet_keypoints.py" if getattr(args, 'training_type', 'rfdetr') == 'hrnet' else "train_rfdetr.py"
+    _tt = getattr(args, 'training_type', 'rfdetr')
+    script_name = {
+        "hrnet": "train_hrnet_keypoints.py",
+        "unet":  "train_unet_lines.py",
+    }.get(_tt, "train_rfdetr.py")
     result = subprocess.run(
         ["ssh"] + ssh_opts + [ssh_target, f"pgrep -f {script_name}"],
         capture_output=True, text=True,
@@ -444,7 +484,7 @@ def check_training(args=None):
 
     # Check if training is still running (match either training script)
     proc_check = subprocess.run(
-        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f 'train_(rfdetr|hrnet_keypoints)\\.py'"],
+        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f 'train_(rfdetr|hrnet_keypoints|unet_lines)\\.py'"],
         capture_output=True, text=True,
     )
     is_running = proc_check.returncode == 0
@@ -648,7 +688,7 @@ def main():
     parser.add_argument("--disk-size", type=int, default=50, help="Container disk size in GB (default: 50)")
 
     # Training config
-    parser.add_argument("--training-type", default="rfdetr", choices=["rfdetr", "hrnet"],
+    parser.add_argument("--training-type", default="rfdetr", choices=["rfdetr", "hrnet", "unet"],
                         help="Model to train (default: rfdetr)")
     parser.add_argument("--dataset", default=None, help="Local path to dataset (auto-set per training type)")
     parser.add_argument("--epochs", type=int, default=None, help="Training epochs")
@@ -663,8 +703,20 @@ def main():
                         help="Starting heatmap sigma (HRNet only). Set equal to --sigma-min to hold tight.")
     parser.add_argument("--sigma-min", type=float, default=None,
                         help="Final heatmap sigma (HRNet only).")
+    parser.add_argument("--sigma-shrink-epochs", type=int, default=None,
+                        help="Epochs over which sigma decays from max to min (HRNet only). "
+                             "Default: 60%% of --epochs.")
     parser.add_argument("--channel-weights", default=None,
                         help="Comma-separated per-channel loss weights (HRNet only), e.g. '3,1'.")
+    parser.add_argument("--backbone", default=None,
+                        help="HRNet backbone name (HRNet only). Default hrnet_w48; "
+                             "use hrnet_w18 for the downsized hash-only variant.")
+    parser.add_argument("--num-channels", type=int, default=None,
+                        help="Output heatmap channels (HRNet only). Default 2; "
+                             "use 1 for hash-only.")
+    # UNet specific
+    parser.add_argument("--encoder", default=None,
+                        help="UNet encoder (UNet only). Default efficientnet-b0.")
     # RF-DETR specific
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation (RF-DETR only)")
     parser.add_argument("--resolution", type=int, default=1280, help="Input resolution (RF-DETR only)")
@@ -675,6 +727,13 @@ def main():
     if args.training_type == "hrnet":
         if args.dataset is None:
             args.dataset = os.path.join(PROJECT_ROOT, "data", "field_keypoints")
+        if args.epochs is None:
+            args.epochs = 100
+        if args.batch_size is None:
+            args.batch_size = 16
+    elif args.training_type == "unet":
+        if args.dataset is None:
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "line_detection")
         if args.epochs is None:
             args.epochs = 100
         if args.batch_size is None:

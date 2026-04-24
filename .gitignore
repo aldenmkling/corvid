@@ -43,6 +43,11 @@ data/field_keypoints/valid/
 # AL rounds: track label JSONs + manifests, ignore the bulk JPEG folders
 data/field_keypoints/al_round*/candidates/
 data/field_keypoints/al_round*/images/
+# Line-detection dataset (regeneratable from self_sup_pool_10k + review JSON)
+data/line_detection/
+data/line_detection_build.log
+# Hash-only keypoint split (regeneratable from data/field_keypoints)
+data/field_keypoints_hash_only/
 
 # Output (generated images, tracking results)
 output/
