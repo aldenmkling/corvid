@@ -234,6 +234,12 @@ def upload_dataset(args):
     elif tt == 'unet':
         train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_unet_lines.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_unet_runpod.txt")
+    elif tt == 'unet-hash':
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_unet_hash.py")
+        requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_unet_runpod.txt")
+    elif tt == 'unet-unified':
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_unet_unified.py")
+        requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_unet_runpod.txt")
     else:
         train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_rfdetr.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_runpod.txt")
@@ -259,7 +265,7 @@ def upload_dataset(args):
     # AppleDouble sidecars, which otherwise pollute the extracted dataset on
     # Linux and trip up any glob that matches `*.jpg` or `*.png`.
     tar_env = {**os.environ, "COPYFILE_DISABLE": "1"}
-    if getattr(args, 'training_type', 'rfdetr') in ('hrnet', 'unet') and has_split:
+    if getattr(args, 'training_type', 'rfdetr') in ('hrnet', 'unet', 'unet-hash', 'unet-unified') and has_split:
         with tempfile.TemporaryDirectory() as staging:
             stage_root = os.path.join(staging, dataset_name)
             os.makedirs(stage_root)
@@ -314,8 +320,10 @@ def upload_dataset(args):
     # Install dependencies
     _tt = getattr(args, 'training_type', 'rfdetr')
     req_filename = {
-        "hrnet": "requirements_hrnet_runpod.txt",
-        "unet":  "requirements_unet_runpod.txt",
+        "hrnet":         "requirements_hrnet_runpod.txt",
+        "unet":          "requirements_unet_runpod.txt",
+        "unet-hash":     "requirements_unet_runpod.txt",
+        "unet-unified":  "requirements_unet_runpod.txt",
     }.get(_tt, "requirements_runpod.txt")
     print("  Installing dependencies (this can take a few minutes)...")
     proc = subprocess.Popen(
@@ -409,9 +417,38 @@ def run_training(args):
         )
         if getattr(args, 'encoder', None):
             train_args += f" --encoder {args.encoder}"
+        if getattr(args, 'grayscale', False):
+            train_args += " --grayscale"
         if getattr(args, 'resume', None):
             train_args += " --resume /workspace/resume.pth"
         train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_unet_lines.py{train_args}"
+    elif getattr(args, 'training_type', 'rfdetr') == 'unet-hash':
+        dataset_basename = os.path.basename(os.path.abspath(args.dataset).rstrip(os.sep))
+        train_args = (
+            f" --dataset {dataset_basename}"
+            f" --epochs {args.epochs}"
+            f" --batch-size {args.batch_size}"
+            f" --lr {getattr(args, 'lr', 5e-4)}"
+            f" --output /workspace/output"
+            f" --device cuda"
+        )
+        if getattr(args, 'encoder', None):
+            train_args += f" --encoder {args.encoder}"
+        train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_unet_hash.py{train_args}"
+    elif getattr(args, 'training_type', 'rfdetr') == 'unet-unified':
+        dataset_basename = os.path.basename(os.path.abspath(args.dataset).rstrip(os.sep))
+        train_args = (
+            f" --dataset {dataset_basename}"
+            f" --epochs {args.epochs}"
+            f" --batch-size {args.batch_size}"
+            f" --lr {getattr(args, 'lr', 1e-3)}"
+            f" --encoder-lr-mult {getattr(args, 'backbone_lr_mult', 0.1)}"
+            f" --output /workspace/output"
+            f" --amp"
+        )
+        if getattr(args, 'encoder', None):
+            train_args += f" --encoder {args.encoder}"
+        train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_unet_unified.py{train_args}"
     else:
         train_args = (
             f" --dataset dataset"
@@ -444,8 +481,10 @@ def run_training(args):
     time.sleep(3)
     _tt = getattr(args, 'training_type', 'rfdetr')
     script_name = {
-        "hrnet": "train_hrnet_keypoints.py",
-        "unet":  "train_unet_lines.py",
+        "hrnet":         "train_hrnet_keypoints.py",
+        "unet":          "train_unet_lines.py",
+        "unet-hash":     "train_unet_hash.py",
+        "unet-unified":  "train_unet_unified.py",
     }.get(_tt, "train_rfdetr.py")
     result = subprocess.run(
         ["ssh"] + ssh_opts + [ssh_target, f"pgrep -f {script_name}"],
@@ -484,7 +523,7 @@ def check_training(args=None):
 
     # Check if training is still running (match either training script)
     proc_check = subprocess.run(
-        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f 'train_(rfdetr|hrnet_keypoints|unet_lines)\\.py'"],
+        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f 'train_(rfdetr|hrnet_keypoints|unet_lines|unet_hash|unet_unified)\\.py'"],
         capture_output=True, text=True,
     )
     is_running = proc_check.returncode == 0
@@ -549,6 +588,18 @@ def download_weights(args):
     if training_type == "hrnet":
         weight_files = ["best.pth", "last.pth"]
         prefix = "hrnet"
+        ext = ".pth"
+    elif training_type == "unet-hash":
+        weight_files = ["last.pth"]
+        prefix = "unet_hash"
+        ext = ".pth"
+    elif training_type == "unet-unified":
+        weight_files = ["best.pth", "last.pth"]
+        prefix = "unet_unified"
+        ext = ".pth"
+    elif training_type == "unet":
+        weight_files = ["best.pth", "last.pth"]
+        prefix = "unet_line"
         ext = ".pth"
     else:
         weight_files = ["best.pt", "last.pt"]
@@ -688,7 +739,8 @@ def main():
     parser.add_argument("--disk-size", type=int, default=50, help="Container disk size in GB (default: 50)")
 
     # Training config
-    parser.add_argument("--training-type", default="rfdetr", choices=["rfdetr", "hrnet", "unet"],
+    parser.add_argument("--training-type", default="rfdetr",
+                        choices=["rfdetr", "hrnet", "unet", "unet-hash", "unet-unified"],
                         help="Model to train (default: rfdetr)")
     parser.add_argument("--dataset", default=None, help="Local path to dataset (auto-set per training type)")
     parser.add_argument("--epochs", type=int, default=None, help="Training epochs")
@@ -717,6 +769,8 @@ def main():
     # UNet specific
     parser.add_argument("--encoder", default=None,
                         help="UNet encoder (UNet only). Default efficientnet-b0.")
+    parser.add_argument("--grayscale", action="store_true",
+                        help="Train UNet on grayscale-replicated input (UNet only).")
     # RF-DETR specific
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation (RF-DETR only)")
     parser.add_argument("--resolution", type=int, default=1280, help="Input resolution (RF-DETR only)")
@@ -738,6 +792,27 @@ def main():
             args.epochs = 100
         if args.batch_size is None:
             args.batch_size = 16
+    elif args.training_type == "unet-hash":
+        if args.dataset is None:
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "hash_masks", "round1")
+        if args.epochs is None:
+            args.epochs = 80
+        if args.batch_size is None:
+            args.batch_size = 16
+        if args.encoder is None:
+            args.encoder = "mit_b0"
+        # mit_b0 default lr
+        if args.lr == 1e-3:
+            args.lr = 5e-4
+    elif args.training_type == "unet-unified":
+        if args.dataset is None:
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "unified")
+        if args.epochs is None:
+            args.epochs = 100
+        if args.batch_size is None:
+            args.batch_size = 16
+        if args.encoder is None:
+            args.encoder = "mit_b0"
     else:
         if args.dataset is None:
             args.dataset = os.path.join(PROJECT_ROOT, "data", "player_detection")

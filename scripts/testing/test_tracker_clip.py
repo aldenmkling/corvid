@@ -24,7 +24,8 @@ from src.homography.field_model import (
     HASH_Y_NEAR, HASH_Y_FAR,
 )
 
-WEIGHTS = os.path.join(PROJECT_ROOT, "models", "hrnet_finetuned_last.pth")
+UNET_WEIGHTS = os.path.join(PROJECT_ROOT, "models", "unet_line_round2_best.pth")
+HASH_WEIGHTS = os.path.join(PROJECT_ROOT, "models", "hrnet_w18_hash_round1_best.pth")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "tracker_test")
 
 
@@ -128,7 +129,7 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     frames = extract_frames(args.video, args.fractions)
 
-    tracker = HomographyTracker(WEIGHTS, device="cpu")
+    tracker = HomographyTracker(UNET_WEIGHTS, HASH_WEIGHTS, device="mps")
 
     for i, (frac, idx, frame) in enumerate(frames):
         if frame is None:

@@ -1,0 +1,8 @@
+# Frames to skip when building hash mask training sets.
+# One filename per line. Lines starting with # are ignored.
+# Reason after each entry helps future-us.
+
+2019102712_play_114_sideline_90.jpg   # bad GT (per round-3 preview review)
+2024090802_play_128_sideline_75.jpg   # bad GT (per round-3 preview review)
+2024091501_play_078_sideline_90.jpg   # bad GT (per round-3 preview review)
+2024102701_play_077_sideline_90.jpg   # bad GT (per round-3 preview review)

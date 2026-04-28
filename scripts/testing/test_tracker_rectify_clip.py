@@ -27,9 +27,123 @@ from src.homography.field_model import (
     YARD_LINE_POSITIONS,
 )
 
-WEIGHTS = os.path.join(PROJECT_ROOT, "models", "hrnet_finetuned_last.pth")
+UNET_WEIGHTS = os.path.join(PROJECT_ROOT, "models", "unet_line_round2_best.pth")
+HASH_WEIGHTS = os.path.join(PROJECT_ROOT, "models", "hrnet_w18_hash_round1_best.pth")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "tracker_rectify")
 YD_PER_PX = 0.1
+
+# Map kind ↔ field y for keypoint smoothing reverse lookup
+_KIND_TO_FIELD_Y = {
+    "sideline_near": 0.0,
+    "sideline_far":  FIELD_WIDTH,
+    "near_hash":     HASH_Y_NEAR,
+    "far_hash":      HASH_Y_FAR,
+}
+
+
+def _kind_from_field_y(fy: float) -> str:
+    if fy < 1.0:
+        return "sideline_near"
+    if fy > FIELD_WIDTH - 1.0:
+        return "sideline_far"
+    return "near_hash" if abs(fy - HASH_Y_NEAR) < abs(fy - HASH_Y_FAR) else "far_hash"
+
+
+def _yard_slot_from_field_x(fx: float) -> int:
+    return int(round((fx - 10.0) / 5.0))
+
+
+def smooth_keypoint_tracks_and_resolve(meta, raw_Hs, window: int, poly: int):
+    """Per-keypoint SG smoothing + per-frame H re-solve.
+
+    Each detected keypoint has an offline-stable identity (kind, yard_slot)
+    that lets us build a time series of its pixel position across the clip.
+    Smoothing each track independently kills:
+      - polynomial-coefficient noise on UNet line fits → sideline×yardline
+        intersection wiggle
+      - W18 hash heatmap variance
+      - any per-frame outlier (one-frame bad poly fit)
+
+    Returns (new_pixel_pts_u, new_field_pts, new_Hs) — each list of length
+    len(meta). Entries are None where we couldn't form a valid solution.
+    """
+    from scipy.signal import savgol_filter
+
+    n = len(meta)
+    # tracks[(kind, slot)] = dict frame_idx -> (px, py)
+    tracks: dict = {}
+    for i, m in enumerate(meta):
+        if m["pixel_pts_u"] is None or m["field_pts"] is None:
+            continue
+        for k in range(len(m["pixel_pts_u"])):
+            fx, fy = float(m["field_pts"][k][0]), float(m["field_pts"][k][1])
+            px, py = float(m["pixel_pts_u"][k][0]), float(m["pixel_pts_u"][k][1])
+            key = (_kind_from_field_y(fy), _yard_slot_from_field_x(fx))
+            tracks.setdefault(key, {})[i] = (px, py)
+
+    smoothed: dict = {}
+    n_tracks_smoothed = 0
+    for key, frame_to_xy in tracks.items():
+        indices = sorted(frame_to_xy.keys())
+        if len(indices) < window:
+            # Track too short for SG; pass through raw
+            smoothed[key] = {i: frame_to_xy[i] for i in indices}
+            continue
+
+        # Build dense series across [i_min, i_max], linearly interp gaps.
+        i_min, i_max = indices[0], indices[-1]
+        idx_arr = np.array(indices, dtype=np.int64)
+        xs = np.array([frame_to_xy[i][0] for i in indices])
+        ys = np.array([frame_to_xy[i][1] for i in indices])
+        full = np.arange(i_min, i_max + 1)
+        dense_x = np.interp(full, idx_arr, xs)
+        dense_y = np.interp(full, idx_arr, ys)
+
+        # SG along time
+        eff_window = window if (window <= len(dense_x)) else (
+            len(dense_x) | 1)  # ensure odd, ≤ length
+        eff_poly = min(poly, eff_window - 1)
+        sm_x = savgol_filter(dense_x, window_length=eff_window,
+                              polyorder=eff_poly, mode="nearest")
+        sm_y = savgol_filter(dense_y, window_length=eff_window,
+                              polyorder=eff_poly, mode="nearest")
+
+        # Read out smoothed values only at originally-observed frames.
+        smoothed[key] = {
+            int(i): (float(sm_x[i - i_min]), float(sm_y[i - i_min]))
+            for i in indices
+        }
+        n_tracks_smoothed += 1
+
+    # Per-frame re-solve from smoothed keypoints
+    new_pixel = [None] * n
+    new_field = [None] * n
+    new_Hs = [None] * n
+    for i in range(n):
+        kpts = []  # (px, py, fx, fy)
+        for (kind, slot), frame_to_xy in smoothed.items():
+            if i not in frame_to_xy:
+                continue
+            px, py = frame_to_xy[i]
+            kpts.append((px, py,
+                         10.0 + slot * 5.0,
+                         _KIND_TO_FIELD_Y[kind]))
+        if len(kpts) < 4:
+            continue
+        pxs = np.array([[k[0], k[1]] for k in kpts], dtype=np.float64)
+        fxs = np.array([[k[2], k[3]] for k in kpts], dtype=np.float64)
+        H, _ = cv2.findHomography(pxs, fxs, method=cv2.RANSAC,
+                                   ransacReprojThreshold=1.5)
+        if H is None:
+            continue
+        new_pixel[i] = pxs
+        new_field[i] = fxs
+        new_Hs[i] = H
+
+    print(f"  keypoint smoothing: {len(tracks)} tracks "
+          f"({n_tracks_smoothed} ≥window={window}), "
+          f"{sum(1 for h in new_Hs if h is not None)}/{n} frames re-solved")
+    return new_pixel, new_field, new_Hs
 
 
 def show_first_frame(clip_path: str, out_path: str):
@@ -40,42 +154,45 @@ def show_first_frame(clip_path: str, out_path: str):
     if not ret:
         print(f"failed to read {clip_path}")
         return
-    tracker = HomographyTracker(WEIGHTS)
+    tracker = HomographyTracker(UNET_WEIGHTS, HASH_WEIGHTS)
     det = tracker._detect(frame)
-    groups = det["groups"]
-    sideline_pxs = det["sideline_pxs"]
+    result = det["result"]
 
     vis = frame.copy()
-    # Paired groups get ordered grid_pos from assign_grid_positions
+    # Yardlines get ordered grid_pos from grid_solver_v2 assign_grid_positions
     colors = [(255, 80, 80), (80, 255, 80), (80, 80, 255),
               (255, 255, 80), (255, 80, 255), (80, 255, 255),
               (255, 150, 50), (150, 50, 255), (50, 255, 150),
               (200, 200, 200)]
-    for g in groups:
-        gp = g.get("grid_pos")
-        if gp is None:
+    for yl in result.yardlines:
+        if yl.grid_pos is None:
             continue
-        color = colors[gp % len(colors)]
-        fh, nh, sl = g.get("far_hash"), g.get("near_hash"), g.get("sideline")
-        if g.get("singleton"):
-            pt = fh or nh or sl
-            if pt is None: continue
-            cv2.drawMarker(vis, tuple(int(x) for x in pt), color,
-                           cv2.MARKER_CROSS, 20, 2)
-            cv2.putText(vis, f"g{gp}s", (int(pt[0])+8, int(pt[1])+20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        color = colors[yl.grid_pos % len(colors)]
+        fh, nh = yl.far_hash, yl.near_hash
+        ns, fs = yl.near_sideline, yl.far_sideline
+        ok_tag = "" if yl.grid_fit_ok else "?"
+
+        if fh is not None and nh is not None:
+            cv2.line(vis, tuple(int(x) for x in nh),
+                     tuple(int(x) for x in fh), color, 2)
+            cv2.drawMarker(vis, tuple(int(x) for x in fh), color,
+                           cv2.MARKER_CROSS, 16, 2)
+            cv2.drawMarker(vis, tuple(int(x) for x in nh), color,
+                           cv2.MARKER_CROSS, 16, 2)
+            cv2.putText(vis, f"g{yl.grid_pos}{ok_tag}",
+                        (int(nh[0])+8, int(nh[1])+20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         else:
-            if nh and fh:
-                cv2.line(vis, tuple(int(x) for x in nh),
-                         tuple(int(x) for x in fh), color, 2)
-                cv2.drawMarker(vis, tuple(int(x) for x in fh), color,
-                               cv2.MARKER_CROSS, 16, 2)
-                cv2.drawMarker(vis, tuple(int(x) for x in nh), color,
-                               cv2.MARKER_CROSS, 16, 2)
-                cv2.putText(vis, f"g{gp}", (int(nh[0])+8, int(nh[1])+20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-            if sl:
-                cv2.circle(vis, tuple(int(x) for x in sl), 10, color, 2)
+            single = fh if fh is not None else nh
+            if single is not None:
+                cv2.drawMarker(vis, tuple(int(x) for x in single), color,
+                               cv2.MARKER_CROSS, 20, 2)
+                cv2.putText(vis, f"g{yl.grid_pos}s{ok_tag}",
+                            (int(single[0])+8, int(single[1])+20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        for s in (ns, fs):
+            if s is not None:
+                cv2.circle(vis, tuple(int(x) for x in s), 10, color, 2)
 
     # Legend with NGS anchor reference
     cv2.putText(vis, "Tell me: what NGS x is g0? (NGS: 10=leftGoal, 60=50yd, 110=rightGoal)",
@@ -86,8 +203,8 @@ def show_first_frame(clip_path: str, out_path: str):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     cv2.imwrite(out_path, vis)
     print(f"  saved {out_path}")
-    # Also print identified grid_pos range
-    gps = sorted([g["grid_pos"] for g in groups if g.get("grid_pos") is not None])
+    gps = sorted([yl.grid_pos for yl in result.yardlines
+                  if yl.grid_pos is not None])
     if gps:
         print(f"  grid_pos range: g{gps[0]} through g{gps[-1]} ({len(set(gps))} distinct)")
 
@@ -96,7 +213,10 @@ def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
                  fps_override: float = None, use_track_bank: bool = True,
                  bank_coast: bool = False,   # default off: see tracker.py note
                  smooth_window: int = 0, smooth_poly: int = 2,
-                 device: str = "cpu"):
+                 keypoint_smooth_window: int = 0, keypoint_smooth_poly: int = 3,
+                 device: str = "mps",
+                 unet_weights: str = UNET_WEIGHTS,
+                 hash_weights: str = HASH_WEIGHTS):
     """Run tracker on every frame, warp each to top-down, write as MP4.
 
     If smooth_window > 0: run in two passes. Pass 1 runs tracker + caches
@@ -121,7 +241,7 @@ def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
     os.makedirs(os.path.dirname(output_mp4), exist_ok=True)
     writer = cv2.VideoWriter(output_mp4, fourcc, fps, (out_w, out_h))
 
-    tracker = HomographyTracker(WEIGHTS, device=device,
+    tracker = HomographyTracker(unet_weights, hash_weights, device=device,
                                 use_track_bank=use_track_bank,
                                 track_bank_coast=bank_coast)
 
@@ -186,6 +306,32 @@ def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
         })
     cap.release()
     print(f"  pass 1 done: cached {len(cached_frames)} frames")
+
+    # ── Per-keypoint SG smoothing → re-solve H per frame ──
+    # Replaces the SG-on-H block when keypoint_smooth_window > 0. Smooths each
+    # (kind, yard_slot) track's pixel position across time, then refits H from
+    # smoothed keypoints — kills the polynomial-coefficient + intersection-
+    # extrapolation jitter without flexing the projective constraint.
+    if keypoint_smooth_window > 0 and len(meta) >= keypoint_smooth_window:
+        new_pixel, new_field, new_Hs = smooth_keypoint_tracks_and_resolve(
+            meta, raw_Hs, keypoint_smooth_window, keypoint_smooth_poly,
+        )
+        for i in range(len(meta)):
+            if new_Hs[i] is not None:
+                raw_Hs[i] = new_Hs[i]
+                meta[i]["pixel_pts_u"] = new_pixel[i]
+                meta[i]["field_pts"] = new_field[i]
+                # Recompute err on smoothed correspondences
+                projected = (raw_Hs[i] @ np.hstack([
+                    new_pixel[i],
+                    np.ones((len(new_pixel[i]), 1)),
+                ]).T).T
+                projected = projected[:, :2] / projected[:, 2:3]
+                meta[i]["err"] = float(np.mean(np.linalg.norm(
+                    projected - new_field[i], axis=1)))
+                # Smoothed-kpt re-solve effectively makes this a 'full' frame
+                if meta[i]["method"] == "carry":
+                    meta[i]["method"] = "full"
 
     # ── Carry imputation ──
     # Carry mode copies H_prev, which is wasteful — we have future frames too.
@@ -289,7 +435,10 @@ def rectify_clip(clip_path: str, anchor: float, output_mp4: str,
               f"(err > {bad_threshold:.2f} yd)")
 
     # ── Optional: Savitzky-Golay smoothing over H ──
-    if smooth_window > 0 and len(raw_Hs) >= smooth_window:
+    # Skipped when keypoint smoothing was applied — smoothing twice over-blurs.
+    if keypoint_smooth_window > 0:
+        Hs = raw_Hs
+    elif smooth_window > 0 and len(raw_Hs) >= smooth_window:
         from scipy.signal import savgol_filter
         H_flat = np.stack([h.flatten() for h in raw_Hs], axis=0)  # (N, 9)
         # Normalize each row so H[2,2]=1 BEFORE smoothing (consistent scale)
@@ -442,11 +591,22 @@ def main():
                              "a feedback loop with H_prev-drift.")
     parser.add_argument("--smooth-window", type=int, default=0,
                         help="Savitzky-Golay window (odd, e.g. 15) over H "
-                             "matrix across frames. 0 = disabled.")
+                             "matrix across frames. 0 = disabled. Skipped "
+                             "when --keypoint-smooth-window > 0.")
     parser.add_argument("--smooth-poly", type=int, default=2)
-    parser.add_argument("--device", default="cpu",
+    parser.add_argument("--keypoint-smooth-window", type=int, default=0,
+                        help="Per-keypoint SG window (odd, e.g. 31) over each "
+                             "(kind, yard_slot) track's pixel position. H is "
+                             "re-solved per frame from smoothed keypoints. "
+                             "Replaces --smooth-window when set.")
+    parser.add_argument("--keypoint-smooth-poly", type=int, default=3)
+    parser.add_argument("--device", default="mps",
                         choices=["cpu", "cuda", "mps"],
                         help="Torch device for HRNet inference.")
+    parser.add_argument("--unet-weights", default=UNET_WEIGHTS,
+                        help="Path to UNet line-detection weights")
+    parser.add_argument("--hash-weights", default=HASH_WEIGHTS,
+                        help="Path to W18 hash-detection weights")
     args = parser.parse_args()
 
     base = os.path.splitext(os.path.basename(args.clip))[0]
@@ -460,7 +620,9 @@ def main():
             print("--anchor required when rendering full clip")
             return
         suffix = "_nobank" if args.no_track_bank else ""
-        if args.smooth_window > 0:
+        if args.keypoint_smooth_window > 0:
+            suffix += f"_kpsg{args.keypoint_smooth_window}"
+        elif args.smooth_window > 0:
             suffix += f"_sg{args.smooth_window}"
         out = args.output or os.path.join(
             OUTPUT_DIR, f"{tag}_rectified{suffix}.mp4")
@@ -469,7 +631,11 @@ def main():
                      bank_coast=args.bank_coast,
                      smooth_window=args.smooth_window,
                      smooth_poly=args.smooth_poly,
-                     device=args.device)
+                     keypoint_smooth_window=args.keypoint_smooth_window,
+                     keypoint_smooth_poly=args.keypoint_smooth_poly,
+                     device=args.device,
+                     unet_weights=args.unet_weights,
+                     hash_weights=args.hash_weights)
 
 
 if __name__ == "__main__":

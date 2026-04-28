@@ -210,35 +210,63 @@ class KeypointTrackBank:
     ) -> tuple[bool, dict]:
         """Check whether H_cur is consistent with established tracks.
 
-        For each correspondence whose identity (kind, slot) has an existing
-        TRUSTED track, project the correspondence's pixel via H_cur to field,
-        and measure residual to the track's canonical field position.
+        Two sources of residuals:
+          1. For each current correspondence whose identity (kind, slot) has
+             an existing TRUSTED track, project the correspondence's pixel
+             via H_cur to field, compare to canonical.
+          2. For each TRUSTED track NOT covered by a current correspondence
+             (e.g., because a hash was misclassified and now claims a
+             different identity), project the track's last-seen pixel via
+             H_cur to field, compare to canonical. Catches identity flips
+             that would otherwise silently bypass (1).
 
-        If too many trusted tracks fail the residual check → H_cur is bad.
-
-        Returns (is_valid, diagnostics_dict).
+        Reject if median residual > tol or bad-fraction > h_bad_frac.
         """
         trusted = {
             k: t for k, t in self.tracks.items()
             if t.n_observations >= self.min_obs_for_trust
         }
-        if not trusted or not correspondences:
+        if not trusted:
             return True, {"n_trusted_checked": 0}
 
         residuals = []
+        n_via_corrs = 0
+        n_via_track = 0
+
+        # Build set of (kind, slot) keys covered by current correspondences.
+        covered_keys = set()
+        for c in correspondences:
+            field_xy = np.asarray(c["field"], dtype=np.float64)
+            kind = c.get("kind") or kind_from_field(
+                field_xy, c.get("channel", 1)
+            )
+            slot_idx, _, _ = snap_to_yard_slot(field_xy[0])
+            covered_keys.add((kind, slot_idx))
+
+        # Source 1: current correspondences that match a trusted track.
         for c in correspondences:
             pixel_u = np.asarray(c["pixel_u"], dtype=np.float64)
             field_xy = np.asarray(c["field"], dtype=np.float64)
-            kind = c.get("kind") or kind_from_field(field_xy, c.get("channel", 1))
+            kind = c.get("kind") or kind_from_field(
+                field_xy, c.get("channel", 1)
+            )
             slot_idx, _, _ = snap_to_yard_slot(field_xy[0])
             t = trusted.get((kind, slot_idx))
             if t is None:
                 continue
-            # Project current pixel via H_cur to field, compare to canonical
+            fxy_via_cur = pixel_to_field(pixel_u.reshape(1, 2), H_cur)[0]
+            residuals.append(float(np.linalg.norm(fxy_via_cur - t.field_pos)))
+            n_via_corrs += 1
+
+        # Source 2: trusted tracks NOT covered by current correspondences.
+        for key, t in trusted.items():
+            if key in covered_keys:
+                continue
             fxy_via_cur = pixel_to_field(
-                pixel_u.reshape(1, 2), H_cur,
+                t.last_pixel_u.reshape(1, 2), H_cur,
             )[0]
             residuals.append(float(np.linalg.norm(fxy_via_cur - t.field_pos)))
+            n_via_track += 1
 
         if not residuals:
             return True, {"n_trusted_checked": 0}
@@ -252,6 +280,8 @@ class KeypointTrackBank:
 
         return is_valid, {
             "n_trusted_checked": len(residuals),
+            "n_via_corrs": n_via_corrs,
+            "n_via_track": n_via_track,
             "n_bad": n_bad,
             "bad_frac": bad_frac,
             "median_residual_yd": median_res,

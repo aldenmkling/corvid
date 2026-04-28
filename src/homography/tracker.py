@@ -1,9 +1,11 @@
 """
 Homography tracker with graceful degradation.
 
-Default pipeline:
-  1. HRNet detects hash/sideline keypoints per frame.
-  2. Grid solver pairs hashes → yard-line groups with relative grid positions.
+Default pipeline (using grid_solver_v2):
+  1. UNet detects yard-line and sideline pixel masks per frame.
+     HRNet-W18 detects hash-intersection keypoints.
+  2. Grid solver groups UNet pixels into yard-line objects, fits polynomials,
+     attaches hashes, and intersects yardlines × sidelines for sideline keypoints.
   3. Plumb-line calibration solves radial distortion once from a well-populated
      frame (usually the first), then reused for the rest of the clip.
   4. Identity assignment: on bootstrap, user-provided anchor; on subsequent
@@ -25,8 +27,6 @@ Invariants:
 
 from __future__ import annotations
 
-import os
-import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -39,21 +39,16 @@ from .field_model import (
     FIELD_LENGTH, FIELD_WIDTH, HASH_Y_NEAR, HASH_Y_FAR,
     YARD_LINE_POSITIONS,
 )
-from .keypoint_detector import FieldKeypointDetector
-from .keypoint_track_bank import (
-    KeypointTrackBank, kind_from_field, snap_to_yard_slot,
-)
-from .grid_solver import (
-    split_hash_rows, pair_hashes, find_sideline_on_yard_line,
-    assign_grid_positions, compute_hash_pca, _row_coord,
-    yardline_tilt_slope_from_pairs, calibrate_distortion_from_lines,
+from .keypoint_track_bank import KeypointTrackBank
+from .grid_solver_v2 import (
+    Yardline, GridSolverResult,
+    solve_grid, run_unet, run_hash_w18,
+    yardlines_to_correspondences, calibrate_distortion_from_result,
+    UNET_YARD_THRESH, UNET_SIDE_THRESH, HASH_THRESH,
 )
 
 
 # ── Constants ──────────────────────────────────────────────────────────────
-
-HASH_CONF_THRESH = 0.40
-SIDELINE_CONF_THRESH = 0.30
 
 # Bounds for snap-to-nearest identity assignment
 IDENTITY_SNAP_MAX_DIST_YD = 1.5   # reject if snap distance > this
@@ -71,6 +66,15 @@ DELTA_MAX_TRANSLATION_PX = 400     # cap per-frame translation
 SIDELINE_Y_CHOICES = np.array([0.0, FIELD_WIDTH])
 # Valid hash y options (near = 23.58, far = 29.75)
 HASH_Y_CHOICES = np.array([HASH_Y_NEAR, HASH_Y_FAR])
+
+# Per-keypoint metadata: (attribute on Yardline, kind string, channel, field_y)
+#   channel: 0=sideline, 1=hash (used by snap-to-grid)
+_KEYPOINT_SLOTS = [
+    ("near_hash",     "near_hash",     1, HASH_Y_NEAR),
+    ("far_hash",      "far_hash",      1, HASH_Y_FAR),
+    ("near_sideline", "sideline_near", 0, 0.0),
+    ("far_sideline",  "sideline_far",  0, FIELD_WIDTH),
+]
 
 
 # ── Output dataclass ───────────────────────────────────────────────────────
@@ -95,167 +99,18 @@ class FrameResult:
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _extract_peaks(heatmap, threshold, orig_shape):
-    """Return (N,2) pixel peaks (in original frame coords) and their confidences."""
-    from scipy import ndimage
-    from .keypoint_detector import _refine_peak
-
-    orig_h, orig_w = orig_shape
-    hm_h, hm_w = heatmap.shape
-    mask = heatmap >= threshold
-    if not mask.any():
-        return np.zeros((0, 2)), np.zeros(0)
-    labels, n = ndimage.label(mask)
-    pxs, confs = [], []
-    for comp_id in range(1, n + 1):
-        comp_mask = labels == comp_id
-        vals = heatmap * comp_mask
-        peak_idx = vals.argmax()
-        py, px_h = peak_idx // hm_w, peak_idx % hm_w
-        confs.append(float(heatmap[py, px_h]))
-        ref_x, ref_y = _refine_peak(heatmap, py, px_h)
-        pxs.append([ref_x / hm_w * orig_w, ref_y / hm_h * orig_h])
-    return np.array(pxs), np.array(confs)
-
-
-def _build_yard_line_groups(hash_pxs, sideline_pxs, sideline_confs):
-    """Pair hashes, attach sidelines, assign grid positions."""
-    far_hashes, near_hashes = split_hash_rows(hash_pxs)
-    pairs, unpaired_far, unpaired_near, _, _ = pair_hashes(
-        far_hashes, near_hashes,
-    )
-
-    groups = []
-    used_sideline = set()
-    for fh, nh in pairs:
-        fh = np.asarray(fh)
-        nh = np.asarray(nh)
-        sl_idx, _ = find_sideline_on_yard_line(
-            nh, fh, sideline_pxs, max_perp_distance=12,
-        )
-        sideline_pt = None
-        sideline_conf = None
-        if sl_idx is not None and sl_idx not in used_sideline:
-            used_sideline.add(sl_idx)
-            sideline_pt = sideline_pxs[sl_idx].tolist()
-            sideline_conf = float(sideline_confs[sl_idx])
-        groups.append({
-            "far_hash": fh.tolist(),
-            "near_hash": nh.tolist(),
-            "sideline": sideline_pt,
-            "sideline_conf": sideline_conf,
-            "singleton": False,
-        })
-    for fh in unpaired_far:
-        groups.append({
-            "far_hash": np.asarray(fh).tolist(),
-            "near_hash": None,
-            "sideline": None,
-            "sideline_conf": None,
-            "singleton": True,
-        })
-    for nh in unpaired_near:
-        groups.append({
-            "far_hash": None,
-            "near_hash": np.asarray(nh).tolist(),
-            "sideline": None,
-            "sideline_conf": None,
-            "singleton": True,
-        })
-
-    # Note: singleton sidelines intentionally not emitted (unreliable).
-    assign_grid_positions(groups)
-    return groups, used_sideline
-
-
-def _groups_to_correspondences(groups, base_ngs_x, frame_shape=None):
-    """Convert yard-line groups into pixel/field arrays using a known anchor.
-
-    Emits:
-      - Paired groups (both hashes + any matched sideline).
-      - Singleton hashes that fit the grid spacing (grid_fit_ok).
-      - Singleton sidelines that fit the grid spacing, classified near/far
-        by image-half (requires frame_shape).
-    """
-    pixel_pts = []
-    field_pts = []
-    labels = []
-    img_mid_y = frame_shape[0] / 2.0 if frame_shape is not None else None
-
-    for g in groups:
-        gp = g.get("grid_pos")
-        if gp is None:
-            continue
-        fx = base_ngs_x + gp * 5
-
-        if g.get("singleton"):
-            if not g.get("grid_fit_ok", False):
-                continue
-            if g["far_hash"] is not None:
-                pixel_pts.append(g["far_hash"])
-                field_pts.append([fx, HASH_Y_FAR])
-                labels.append(f"g{gp}_far_s")
-            elif g["near_hash"] is not None:
-                pixel_pts.append(g["near_hash"])
-                field_pts.append([fx, HASH_Y_NEAR])
-                labels.append(f"g{gp}_near_s")
-            elif g["sideline"] is not None and img_mid_y is not None:
-                sl = g["sideline"]
-                field_y = FIELD_WIDTH if sl[1] < img_mid_y else 0.0
-                pixel_pts.append(sl)
-                field_pts.append([fx, field_y])
-                tag = "side_s_far" if field_y > 0 else "side_s_near"
-                labels.append(f"g{gp}_{tag}")
-            continue
-
-        # Paired group
-        if g["near_hash"] is not None:
-            pixel_pts.append(g["near_hash"])
-            field_pts.append([fx, HASH_Y_NEAR])
-            labels.append(f"g{gp}_near")
-        if g["far_hash"] is not None:
-            pixel_pts.append(g["far_hash"])
-            field_pts.append([fx, HASH_Y_FAR])
-            labels.append(f"g{gp}_far")
-        if g["sideline"] is not None:
-            pixel_pts.append(g["sideline"])
-            field_pts.append([fx, FIELD_WIDTH])
-            labels.append(f"g{gp}_side")
-    return (np.array(pixel_pts) if pixel_pts else np.zeros((0, 2)),
-            np.array(field_pts) if field_pts else np.zeros((0, 2)),
-            labels)
-
-
-def _groups_flat_detections(groups):
-    """Flatten groups into (pixel, channel) pairs for identity-via-projection.
-
-    Channel: 0 = sideline, 1 = hash.
-    """
-    out = []
-    for g in groups:
-        for key in ("near_hash", "far_hash"):
-            if g.get(key) is not None:
-                out.append((np.asarray(g[key], dtype=np.float64), 1))
-        if g.get("sideline") is not None:
-            out.append((np.asarray(g["sideline"], dtype=np.float64), 0))
-    return out
-
-
 def _snap_to_field_grid(field_xy, channel):
     """Given a projected field coordinate and channel, snap to nearest valid
-    grid intersection. Returns (field_xy_snapped, snap_dist_yd) or
-    (None, large) if off-grid.
+    grid intersection. Returns (field_xy_snapped, snap_dist_yd).
 
     Channel 0 = sideline → y ∈ {0, FIELD_WIDTH}
     Channel 1 = hash → y ∈ {HASH_Y_NEAR, HASH_Y_FAR}
     x is snapped to nearest yard-line in YARD_LINE_POSITIONS.
     """
     fx, fy = float(field_xy[0]), float(field_xy[1])
-    # Snap x
     yl = np.asarray(YARD_LINE_POSITIONS, dtype=np.float64)
     x_idx = int(np.argmin(np.abs(yl - fx)))
     fx_snap = float(yl[x_idx])
-    # Snap y
     y_choices = SIDELINE_Y_CHOICES if channel == 0 else HASH_Y_CHOICES
     y_idx = int(np.argmin(np.abs(y_choices - fy)))
     fy_snap = float(y_choices[y_idx])
@@ -263,25 +118,38 @@ def _snap_to_field_grid(field_xy, channel):
     return np.array([fx_snap, fy_snap]), dist
 
 
+def _iter_yardline_keypoints(yl: Yardline):
+    """Yield (pixel_xy, kind_str, channel, expected_field_y) for each
+    detected keypoint on this yardline (skips None slots)."""
+    for attr, kind, channel, fy in _KEYPOINT_SLOTS:
+        pt = getattr(yl, attr, None)
+        if pt is not None:
+            yield np.asarray(pt, dtype=np.float64), kind, channel, fy
+
+
 # ── Main tracker class ─────────────────────────────────────────────────────
 
 class HomographyTracker:
-    """Tracks a per-frame homography through a clip.
+    """Tracks a per-frame homography through a clip using grid_solver_v2.
 
     Usage:
-        tracker = HomographyTracker("models/hrnet_finetuned_last.pth")
+        tracker = HomographyTracker(
+            "models/unet_line_round2_best.pth",
+            "models/hrnet_w18_hash_round1_best.pth",
+        )
         result0 = tracker.process_frame(frame0, anchor_ngs_x=35.0)  # bootstrap
         for frame in frames[1:]:
             result = tracker.process_frame(frame)
-            # result.H, result.method, result.n_correspondences ...
     """
 
     def __init__(
         self,
-        weights_path: str,
-        device: str = "cpu",
-        hash_conf_thresh: float = HASH_CONF_THRESH,
-        sideline_conf_thresh: float = SIDELINE_CONF_THRESH,
+        unet_weights: str,
+        hash_weights: str,
+        device: str = "mps",
+        hash_conf_thresh: float = HASH_THRESH,
+        unet_yard_thresh: float = UNET_YARD_THRESH,
+        unet_side_thresh: float = UNET_SIDE_THRESH,
         identity_snap_max_yd: float = IDENTITY_SNAP_MAX_DIST_YD,
         delta_max_rotation_deg: float = DELTA_MAX_ROTATION_DEG,
         delta_max_translation_px: float = DELTA_MAX_TRANSLATION_PX,
@@ -293,10 +161,37 @@ class HomographyTracker:
                                              # pull H_cur toward the drift →
                                              # runaway slanting. Validation is
                                              # the useful half of the bank.
+        use_gpu_vp: bool = False,            # superseded by CC grouping; kept
+                                             # as opt-in for back-compat.
+        grouping_mode: str = "cc",           # "cc" (CC + collinearity merge,
+                                             # ~7× faster, no degenerate cases)
+                                             # or "vp" (legacy VP-search).
+        recompute_distortion_each_frame: bool = False,
+                                             # False (default): solve at
+                                             # bootstrap and cache. Stable
+                                             # source-panel undistortion + no
+                                             # frame-to-frame H jitter from k1
+                                             # variation. True: recompute per
+                                             # frame for zoom-tracking, but
+                                             # introduces visible source-panel
+                                             # jitter (each frame undistorted
+                                             # with its own k1/k2).
+        linearize: bool = False,             # Default off: linearize works
+                                             # cleanly on some clips but
+                                             # introduces grid-pos off-by-1
+                                             # errors on others (likely from
+                                             # non-uniform perspective-induced
+                                             # yardline spacing fooling the
+                                             # `unit = median(diffs)` estimate
+                                             # in assign_grid_positions). Keep
+                                             # as opt-in pending diagnostic.
     ):
         self.device = device
+        self.unet_weights = unet_weights
+        self.hash_weights = hash_weights
         self.hash_thresh = hash_conf_thresh
-        self.sideline_thresh = sideline_conf_thresh
+        self.unet_yard_thresh = unet_yard_thresh
+        self.unet_side_thresh = unet_side_thresh
         self.identity_snap_max_yd = identity_snap_max_yd
         self.delta_max_rotation_deg = delta_max_rotation_deg
         self.delta_max_translation_px = delta_max_translation_px
@@ -304,12 +199,10 @@ class HomographyTracker:
         self.use_track_bank = use_track_bank
         self.track_bank_coast = track_bank_coast
         self.track_bank = KeypointTrackBank() if use_track_bank else None
-
-        # Build a bare detector; we need raw heatmaps, so we use the model directly.
-        self._detector = FieldKeypointDetector(
-            weights_path, device=device, conf_thresh=0.1,  # permissive, we re-threshold
-        )
-        self._model = self._detector.model
+        self.use_gpu_vp = use_gpu_vp
+        self.grouping_mode = grouping_mode
+        self.recompute_distortion_each_frame = recompute_distortion_each_frame
+        self.linearize = linearize
 
         # Per-clip state
         self.H_prev: Optional[np.ndarray] = None
@@ -319,110 +212,131 @@ class HomographyTracker:
         self.frame_shape: Optional[tuple] = None
         self.intrinsics: Optional[CameraIntrinsics] = None
         self.frame_count: int = 0
+        self.vp_prev: Optional[tuple] = None  # warm-start anchor for GPU VP
 
-    # ── Inference ─────────────────────────────────────────────────────────
-
-    def _run_hrnet(self, frame):
-        """Return 2-channel sigmoided heatmaps (channel 0 = sideline, 1 = hash)."""
-        import torch
-        INPUT_H, INPUT_W = 512, 896
-        IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-
-        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (INPUT_W, INPUT_H)).astype(np.float32) / 255.0
-        img = (img - IMAGENET_MEAN) / IMAGENET_STD
-        img = np.transpose(img, (2, 0, 1))
-        tensor = torch.from_numpy(img).unsqueeze(0).to(self._detector.device)
-
-        with torch.no_grad():
-            logits = self._model(tensor)
-            heatmaps = torch.sigmoid(logits[0]).cpu().numpy()
-        return heatmaps
+    # ── Detection ────────────────────────────────────────────────────────
 
     def _detect(self, frame):
-        """Run HRNet and extract paired yard-line groups."""
-        heatmaps = self._run_hrnet(frame)
+        """Run UNet + W18 + grid solver. Returns dict with masks, hashes,
+        and the GridSolverResult."""
         h, w = frame.shape[:2]
-        sideline_pxs, sideline_confs = _extract_peaks(
-            heatmaps[0], self.sideline_thresh, (h, w),
+        yard_mask, side_mask = run_unet(
+            frame, self.unet_weights, device=self.device,
+            yard_thresh=self.unet_yard_thresh, side_thresh=self.unet_side_thresh,
         )
-        hash_pxs, hash_confs = _extract_peaks(
-            heatmaps[1], self.hash_thresh, (h, w),
+        hash_pxs, hash_confs = run_hash_w18(
+            frame, self.hash_weights, device=self.device,
+            conf_thresh=self.hash_thresh,
         )
-        groups, used_sideline = _build_yard_line_groups(
-            hash_pxs, sideline_pxs, sideline_confs,
+        result = solve_grid(
+            yard_mask, side_mask, hash_pxs,
+            hash_confs=hash_confs, frame_shape=(h, w),
+            use_gpu_vp=self.use_gpu_vp, vp_init=self.vp_prev,
+            vp_device=self.device, grouping_mode=self.grouping_mode,
+            linearize=self.linearize,
+            # If we already have cached intrinsics from a prior frame, pass
+            # them as override so solve_grid skips its internal per-frame
+            # distortion calibration. Calibration runs ONCE on the bootstrap
+            # frame; every other frame reuses k1/k2.
+            intrinsics_override=(self.intrinsics
+                                  if self.linearize and self.intrinsics is not None
+                                  else None),
         )
+        # Cache VP for warm-starting next frame's GPU search.
+        if result.vp is not None:
+            self.vp_prev = result.vp
         return {
-            "heatmaps": heatmaps,
-            "sideline_pxs": sideline_pxs,
-            "sideline_confs": sideline_confs,
+            "yard_mask": yard_mask,
+            "side_mask": side_mask,
             "hash_pxs": hash_pxs,
             "hash_confs": hash_confs,
-            "groups": groups,
+            "result": result,
         }
 
     # ── Distortion ───────────────────────────────────────────────────────
 
-    def _compute_distortion(self, groups, frame_shape):
+    def _compute_distortion(self, result: GridSolverResult, frame_shape):
         """Solve k1, k2 from plumb-line fit using this frame's line groups."""
-        side_row = [g["sideline"] for g in groups if g.get("sideline") is not None]
-        far_row = [g["far_hash"] for g in groups if g.get("far_hash") is not None]
-        near_row = [g["near_hash"] for g in groups if g.get("near_hash") is not None]
-        line_sets = [
-            np.asarray(x) for x in (side_row, far_row, near_row) if len(x) >= 3
-        ]
         h, w = frame_shape
         focal_guess = float(max(h, w))
-        if not line_sets:
-            return 0.0, 0.0, focal_guess
-        k1, k2 = calibrate_distortion_from_lines(line_sets, (h, w), focal_guess)
+        k1, k2 = calibrate_distortion_from_result(
+            result, frame_shape=frame_shape, focal_length_guess=focal_guess,
+        )
         if abs(k1) > 1.0 or abs(k2) > 1.0:
             k1, k2 = 0.0, 0.0  # sanity-reject runaway values
         return k1, k2, focal_guess
 
     # ── Identity assignment by projection + snap ─────────────────────────
 
-    def _identify_via_projection(self, groups):
-        """Use previous H to identify the current frame's groups' field coords.
+    def _identify_via_projection(self, result: GridSolverResult):
+        """Use previous H to identify each yardline's keypoints' field coords.
 
-        Returns (pixel_pts, field_pts, labels) arrays.
-        Only includes detections whose projected field coords snap to a valid
-        grid point within identity_snap_max_yd.
+        Iterates over `result.yardlines`. For each detected keypoint (near_hash,
+        far_hash, near_sideline, far_sideline), projects through H_prev, snaps
+        to nearest grid intersection, and accepts if within tolerance.
+
+        Returns (pixel_pts, field_pts, kinds, labels) — kinds are the track-bank
+        kind strings, labels are human-readable per-correspondence tags.
         """
         if self.H_prev is None:
-            return np.zeros((0, 2)), np.zeros((0, 2)), []
+            return (np.zeros((0, 2)), np.zeros((0, 2)), [], [])
 
-        pixel_pts = []
-        field_pts = []
-        labels = []
+        pixel_pts: list = []
+        field_pts: list = []
+        kinds: list[str] = []
+        labels: list[str] = []
 
-        for g_idx, g in enumerate(groups):
-            # Consider each of the up-to-three keypoints the group has
-            candidates = []
-            if g.get("near_hash") is not None:
-                candidates.append((np.asarray(g["near_hash"]), 1, "near"))
-            if g.get("far_hash") is not None:
-                candidates.append((np.asarray(g["far_hash"]), 1, "far"))
-            if g.get("sideline") is not None:
-                candidates.append((np.asarray(g["sideline"]), 0, "side"))
+        # If solve_grid linearized the result, the keypoints are already in
+        # undistorted space — don't undistort again.
+        already_undistorted = bool(getattr(result, "is_linearized", False))
 
-            for pix, ch, tag in candidates:
-                # Distortion-correct the pixel first
-                pix_u = undistort_points(pix.reshape(1, 2),
-                                          self.intrinsics)[0]
-                fxy_proj = pixel_to_field(pix_u.reshape(1, 2),
-                                            self.H_prev)[0]
-                snapped, dist = _snap_to_field_grid(fxy_proj, ch)
-                if snapped is None or dist > self.identity_snap_max_yd:
+        for yl in result.yardlines:
+            gp_tag = "?" if yl.grid_pos is None else str(yl.grid_pos)
+            for pix, kind, channel, _expected_fy in _iter_yardline_keypoints(yl):
+                if already_undistorted:
+                    pix_u = pix.astype(np.float64)
+                else:
+                    pix_u = undistort_points(pix.reshape(1, 2), self.intrinsics)[0]
+                fxy_proj = pixel_to_field(pix_u.reshape(1, 2), self.H_prev)[0]
+                snapped, dist = _snap_to_field_grid(fxy_proj, channel)
+                if dist > self.identity_snap_max_yd:
                     continue
                 pixel_pts.append(pix.tolist())
                 field_pts.append(snapped.tolist())
-                labels.append(f"g{g.get('grid_pos', '?')}_{tag}")
+                kinds.append(kind)
+                labels.append(f"g{gp_tag}_{kind}")
 
-        return (np.array(pixel_pts) if pixel_pts else np.zeros((0, 2)),
-                np.array(field_pts) if field_pts else np.zeros((0, 2)),
-                labels)
+        return (
+            np.array(pixel_pts) if pixel_pts else np.zeros((0, 2)),
+            np.array(field_pts) if field_pts else np.zeros((0, 2)),
+            kinds,
+            labels,
+        )
+
+    def _bootstrap_correspondences(self, result: GridSolverResult, anchor_ngs_x: float):
+        """Build correspondences for the bootstrap frame using anchor_ngs_x.
+
+        Returns (pixel_pts, field_pts, kinds, labels). Mirrors the projection
+        path's return so process_frame can branch uniformly afterward.
+        """
+        pixel_pts, field_pts, labels = yardlines_to_correspondences(
+            result, anchor_ngs_x,
+        )
+        # Re-derive kinds from labels suffix (yardlines_to_correspondences
+        # encodes the kind in the label, e.g. "g3_near_hash").
+        kind_lookup = {
+            "near_hash": "near_hash", "far_hash": "far_hash",
+            "near_side": "sideline_near", "far_side": "sideline_far",
+        }
+        kinds = []
+        for lbl in labels:
+            for suffix, kind in kind_lookup.items():
+                if lbl.endswith(suffix):
+                    kinds.append(kind)
+                    break
+            else:
+                kinds.append("unknown")
+        return pixel_pts, field_pts, kinds, labels
 
     # ── Homography solve modes ──────────────────────────────────────────
 
@@ -470,7 +384,6 @@ class HomographyTracker:
                 or scale < 1.0 / self.delta_max_scale_change):
             return None
         if abs(rotation_deg) > self.delta_max_rotation_deg:
-            # Clamp rotation to the cap and re-compose
             sign = 1 if rotation_deg > 0 else -1
             rotation_deg = sign * self.delta_max_rotation_deg
             c, s = np.cos(np.radians(rotation_deg)), np.sin(np.radians(rotation_deg))
@@ -504,7 +417,7 @@ class HomographyTracker:
             anchor_ngs_x: NGS x of the leftmost detected yard line (grid_pos 0).
                 Required on the first frame. Optional on subsequent frames —
                 if provided, forces a fresh full-homography calibration and
-                resets the tracker state.
+                resets the identity assignment.
 
         Returns:
             FrameResult dataclass.
@@ -515,9 +428,9 @@ class HomographyTracker:
         self.frame_count += 1
         h, w = frame.shape[:2]
 
-        # Run HRNet + grid solver
+        # Run UNet + W18 + grid solver
         det = self._detect(frame)
-        groups = det["groups"]
+        result: GridSolverResult = det["result"]
 
         # Bootstrap or re-anchor path: requires anchor_ngs_x
         is_bootstrap = self.H_prev is None or anchor_ngs_x is not None
@@ -527,9 +440,14 @@ class HomographyTracker:
                 "the NGS x coordinate of grid_pos 0 (leftmost yard line)."
             )
 
-        # Solve / update distortion (only on bootstrap, reused afterwards)
-        if self.intrinsics is None:
-            k1, k2, focal_guess = self._compute_distortion(groups, (h, w))
+        # Solve / update distortion. With solve_grid's linearize=True (default),
+        # the result already carries calibrated intrinsics + has applied them
+        # to all keypoints — just reuse those. Otherwise compute via plumb-line.
+        if getattr(result, "is_linearized", False) and result.intrinsics is not None:
+            self.intrinsics = result.intrinsics
+            self.frame_shape = (h, w)
+        elif self.intrinsics is None or self.recompute_distortion_each_frame:
+            k1, k2, focal_guess = self._compute_distortion(result, (h, w))
             self.intrinsics = CameraIntrinsics(
                 fx=focal_guess, fy=focal_guess, cx=w / 2.0, cy=h / 2.0,
                 k1=k1, k2=k2,
@@ -538,35 +456,29 @@ class HomographyTracker:
 
         # Build identified correspondences
         if is_bootstrap:
-            pixel_pts, field_pts, labels = _groups_to_correspondences(
-                groups, anchor_ngs_x, frame_shape=(h, w),
+            pixel_pts, field_pts, kinds, labels = self._bootstrap_correspondences(
+                result, anchor_ngs_x,
             )
-            pixel_pts_u = (undistort_points(pixel_pts, self.intrinsics)
+        else:
+            pixel_pts, field_pts, kinds, labels = self._identify_via_projection(result)
+
+        # If the result was linearized, keypoints are ALREADY in undistorted
+        # space — skip the redundant undistort_points call.
+        if getattr(result, "is_linearized", False):
+            pixel_pts_u = (pixel_pts.astype(np.float64)
                            if len(pixel_pts) else np.zeros((0, 2)))
         else:
-            pixel_pts, field_pts, labels = self._identify_via_projection(groups)
             pixel_pts_u = (undistort_points(pixel_pts, self.intrinsics)
                            if len(pixel_pts) else np.zeros((0, 2)))
 
-        # Build correspondence dicts (used by track bank). Infer kind from
-        # the snapped field y — sidelines sit at 0 or FIELD_WIDTH, hashes at
-        # the hash-row y values.
-        def _infer_kind(fy):
-            if fy < 1.0:
-                return "sideline_near"
-            if fy > FIELD_WIDTH - 1.0:
-                return "sideline_far"
-            return "far_hash" if abs(fy - HASH_Y_FAR) < abs(fy - HASH_Y_NEAR) else "near_hash"
-
+        # Build correspondence dicts (used by track bank).
         current_corr = [
             {"pixel_u": pixel_pts_u[i], "field": field_pts[i],
-             "kind": _infer_kind(float(field_pts[i][1]))}
+             "kind": kinds[i] if i < len(kinds) else "unknown"}
             for i in range(len(pixel_pts_u))
         ]
 
         # Optionally coast unobserved tracks into the correspondence set.
-        # This both (a) densifies sparse-detection frames and (b) creates an
-        # opportunity for the track bank to reject inconsistent fresh detections.
         coasted = []
         if (self.track_bank is not None and self.track_bank_coast
                 and self.H_prev is not None and not is_bootstrap):
@@ -591,15 +503,11 @@ class HomographyTracker:
         full = None
         validated_by_bank = None
         bank_diag = None
-        # Require at least 4 REAL current-frame observations before doing full.
-        # If we only have coasted points, the solve is trivial (they all
-        # came from H_prev) — should be treated as carry, not full.
         n_real = len(current_corr)
         if n >= 4 and n_real >= 4:
             full = self._solve_full_homography(combined_pixel_u, combined_field)
             # Sanity check: on non-bootstrap frames, verify the new H doesn't
-            # disagree hugely with H_prev. If it does, the identity assignment
-            # was probably wrong (camera moved too far between frames).
+            # disagree hugely with H_prev.
             if full is not None and not is_bootstrap and self.H_prev is not None:
                 H_candidate = full[0]
                 field_projected = pixel_to_field(combined_pixel_u, H_candidate)
@@ -619,7 +527,7 @@ class HomographyTracker:
                 bank_diag = diag
                 validated_by_bank = valid
                 if not valid:
-                    full = None  # track bank says this H is inconsistent
+                    full = None
 
         if full is not None:
             H, H_inv, mask, inliers = full
@@ -673,8 +581,6 @@ class HomographyTracker:
         self.prev_field_pts = used_field
 
         # Update track bank with this frame's REAL observations (not coasted).
-        # Only update on successful full/delta; carry-mode means we don't
-        # trust the current frame's identities.
         track_bank_stats = None
         if self.track_bank is not None and method in ("full", "delta"):
             self.track_bank.observe(current_corr, frame_idx=self.frame_count)
@@ -695,9 +601,10 @@ class HomographyTracker:
             delta_translation_px=delta_info["translation_px"] if delta_info else None,
             frame_idx=self.frame_count,
             diagnostics={
-                "n_sideline_detections": len(det["sideline_pxs"]),
                 "n_hash_detections": len(det["hash_pxs"]),
-                "n_yard_line_groups": len(groups),
+                "n_yardlines": len(result.yardlines),
+                "n_sidelines": int(result.far_sideline is not None)
+                                + int(result.near_sideline is not None),
                 "labels_used": labels if is_bootstrap else [""] * n,
                 "n_current_corr": len(current_corr),
                 "n_coasted_corr": len(coasted),

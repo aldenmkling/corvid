@@ -54,9 +54,10 @@ CLASS_WEIGHTS = (1.0, 3.0)
 class LineSegDataset(Dataset):
     """Frames with 2-channel line masks (yard, side)."""
 
-    def __init__(self, root, augment=False):
+    def __init__(self, root, augment=False, grayscale=False):
         self.img_dir = os.path.join(root, "images")
         self.mask_dir = os.path.join(root, "masks")
+        self.grayscale = grayscale
         # macOS tar can leave `._filename.jpg` AppleDouble metadata sidecars
         # in extracted dirs. Skip them — they aren't real images.
         candidate_ids = [os.path.splitext(f)[0] for f in sorted(os.listdir(self.img_dir))
@@ -119,6 +120,11 @@ class LineSegDataset(Dataset):
         if img is None:
             raise FileNotFoundError(f"cv2.imread returned None for {img_path}")
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if getattr(self, "grayscale", False):
+            # Convert to grayscale and replicate to 3 channels so model
+            # input shape is unchanged. Tests whether color matters.
+            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            img = np.stack([gray, gray, gray], axis=-1)
         mask = cv2.imread(mask_path)
         if mask is None:
             raise FileNotFoundError(f"cv2.imread returned None for {mask_path}")
@@ -266,17 +272,28 @@ def main():
     ap.add_argument("--class-weights", default=None,
                     help="Comma-separated per-class loss weights [yard,side]. "
                          f"Default {CLASS_WEIGHTS}")
+    ap.add_argument("--grayscale", action="store_true",
+                    help="Convert input to grayscale and replicate to 3 channels.")
+    ap.add_argument("--device", default=None,
+                    help="Force device: 'mps', 'cuda', or 'cpu'. Auto-detects if unset.")
     args = ap.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else
-                          ("mps" if torch.backends.mps.is_available() else "cpu"))
-    print(f"Device: {device}  Encoder: {args.encoder}")
+    if args.device:
+        device = torch.device(args.device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else
+                              ("mps" if torch.backends.mps.is_available() else "cpu"))
+    print(f"Device: {device}  Encoder: {args.encoder}  "
+          f"Grayscale: {args.grayscale}")
     if not args.no_augment and not HAS_ALB:
         print("WARN: albumentations not installed — falling back to no augment")
 
-    train_ds = LineSegDataset(os.path.join(args.dataset, "train"), augment=not args.no_augment)
-    val_ds = LineSegDataset(os.path.join(args.dataset, "valid"), augment=False)
+    train_ds = LineSegDataset(os.path.join(args.dataset, "train"),
+                                augment=not args.no_augment,
+                                grayscale=args.grayscale)
+    val_ds = LineSegDataset(os.path.join(args.dataset, "valid"),
+                              augment=False, grayscale=args.grayscale)
     print(f"train: {len(train_ds)}, valid: {len(val_ds)}")
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
