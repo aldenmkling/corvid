@@ -29,6 +29,8 @@ import cv2
 import numpy as np
 import torch
 from scipy.optimize import minimize_scalar
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import pdist
 
 import segmentation_models_pytorch as smp
 
@@ -278,29 +280,209 @@ class HashRowTracker:
 
 
 # ── Per-frame helpers ─────────────────────────────────────────────────────
-def detect_hash_rows(hash_mask: np.ndarray, intr: CameraIntrinsics,
-                     min_pixels: int = 30):
-    """Returns list of (m, c) — up to 2 lines from sequential RANSAC."""
-    ys, xs = np.where(hash_mask > 0)
-    if len(xs) < min_pixels:
-        return []
-    pts = np.column_stack([xs, ys]).astype(np.float64)
-    if len(pts) > MAX_HASH_PIXELS:
-        idx = np.random.RandomState(0).choice(len(pts),
-                                                MAX_HASH_PIXELS, replace=False)
-        pts = pts[idx]
-    pts_u = undistort_points(pts, intr)
+def compute_hash_data(hash_mask: np.ndarray,
+                       fits_kept: list,
+                       g_index: np.ndarray,
+                       g0_x: float,
+                       intr: CameraIntrinsics,
+                       prev_far, prev_near,
+                       w: int, h: int,
+                       g0_lo: float = 10.0, g0_hi: float = 110.0,
+                       yd_per_grid: float = 5.0,
+                       min_cc_area: int = 8,
+                       proximity_merge_px: float = 12.0,
+                       yardline_max_perp_px_frac: float = 0.4,
+                       yardline_max_perp_px_fallback: float = 60.0,
+                       min_row_sep_px: float = 30.0):
+    """End-to-end hash detection: CC → label → row fits → corrs.
+
+    Replaces the pixel-RANSAC `detect_hash_rows` + `hash_centroid_keypoints`
+    pair with a single pass that:
+
+      1. CC + proximity merge → centroids (in undistorted space).
+      2. Assign each CC to closest yardline (perp-distance gated).
+      3. Label near/far:
+           - 2+ CCs on same yardline → gold (smallest image-y = far).
+           - Single-CC yardlines → propagate from gold seed, slope-aware
+             (each newly labeled CC becomes an anchor; once we have 2+
+             anchors per row we have a slope; otherwise zero-slope
+             assumption for the comparison only).
+           - No gold pair this frame → gap-split (sort by image-y, find
+             largest gap > `min_row_sep_px`); if no gap, all-on-one-row
+             → use prev_far / prev_near history to decide which side.
+      4. Fit row lines from labeled centroids. Each side: 2+ centroids →
+         least-squares `y = m·x + c`. 1 or 0 centroids → no row line for
+         that side (NO manufactured slope; painted_numbers' reference
+         slope falls through to sideline / cross-side hash).
+      5. Emit one corr per labeled CC, snapped to yardline at the
+         centroid's image-y.
+
+    Returns (rows_dict, corrs):
+      rows_dict: {'far': (m,c)|None, 'near': (m,c)|None, 'state': str}
+      corrs: list of corr dicts ready to merge into the H solver input.
+    """
+    n_cc, _, stats, centroids = cv2.connectedComponentsWithStats(
+        hash_mask, connectivity=8)
+    raw = []
+    for i in range(1, n_cc):
+        if int(stats[i, cv2.CC_STAT_AREA]) < min_cc_area:
+            continue
+        raw.append((float(centroids[i, 0]), float(centroids[i, 1])))
+    if not raw or not fits_kept:
+        return {'far': None, 'near': None, 'state': 'no_ccs'}, []
+    cc = np.array(raw, dtype=np.float64)
+
+    if len(cc) > 1:
+        Z = linkage(pdist(cc), method='single')
+        cluster = fcluster(Z, t=proximity_merge_px, criterion='distance')
+        merged = []
+        for cid in np.unique(cluster):
+            mask = cluster == cid
+            merged.append(cc[mask].mean(axis=0))
+        cc = np.array(merged, dtype=np.float64)
+
+    cc_u = undistort_points(cc, intr)
+
+    if len(fits_kept) >= 2:
+        xs_at_h = sorted(f['a'] + f['b'] * (h / 2) for f in fits_kept)
+        gaps_x = [xs_at_h[i + 1] - xs_at_h[i] for i in range(len(xs_at_h) - 1)]
+        spacing_px = float(np.median(gaps_x)) if gaps_x else 0.0
+        perp_thr = (yardline_max_perp_px_frac * spacing_px
+                    if spacing_px > 0 else yardline_max_perp_px_fallback)
+    else:
+        perp_thr = yardline_max_perp_px_fallback
+
+    cc_yl = []
+    for cx, cy in cc_u:
+        best_j, best_d = None, float('inf')
+        for j, fit in enumerate(fits_kept):
+            d = abs(cx - (fit['a'] + fit['b'] * cy)) / np.sqrt(1.0 + fit['b'] ** 2)
+            if d < best_d:
+                best_d, best_j = d, j
+        cc_yl.append(best_j if best_d <= perp_thr else None)
+
+    by_yl = defaultdict(list)
+    for ci, j in enumerate(cc_yl):
+        if j is not None:
+            by_yl[j].append(ci)
+
+    labels = [None] * len(cc_u)
+    near_anchors = []
+    far_anchors = []
+
+    for j, ci_list in by_yl.items():
+        if len(ci_list) >= 2:
+            ci_sorted = sorted(ci_list, key=lambda i: cc_u[i, 1])
+            ci_far = ci_sorted[0]
+            ci_near = ci_sorted[-1]
+            labels[ci_far] = 'far'
+            labels[ci_near] = 'near'
+            far_anchors.append((float(cc_u[ci_far, 0]), float(cc_u[ci_far, 1])))
+            near_anchors.append((float(cc_u[ci_near, 0]), float(cc_u[ci_near, 1])))
+
+    def _predict_y_at(image_x, anchors):
+        if not anchors:
+            return None
+        if len(anchors) == 1:
+            return anchors[0][1]
+        pts = np.array(anchors)
+        m, c = np.polyfit(pts[:, 0], pts[:, 1], 1)
+        return float(m * image_x + c)
+
+    if near_anchors and far_anchors:
+        seed_x = float(np.median(
+            [x for x, _ in near_anchors + far_anchors]))
+        singles = []
+        for j, ci_list in by_yl.items():
+            if len(ci_list) == 1:
+                ci = ci_list[0]
+                singles.append((float(cc_u[ci, 0]), ci))
+        singles.sort(key=lambda s: abs(s[0] - seed_x))
+        for cx_single, ci in singles:
+            cy_single = float(cc_u[ci, 1])
+            near_y_pred = _predict_y_at(cx_single, near_anchors)
+            far_y_pred = _predict_y_at(cx_single, far_anchors)
+            if near_y_pred is None or far_y_pred is None:
+                continue
+            if abs(cy_single - near_y_pred) < abs(cy_single - far_y_pred):
+                labels[ci] = 'near'
+                near_anchors.append((cx_single, cy_single))
+            else:
+                labels[ci] = 'far'
+                far_anchors.append((cx_single, cy_single))
+    else:
+        # No gold pair this frame. Per-CC fallback:
+        #   - history (prev_far / prev_near) gives the most reliable signal
+        #     when available — compare each CC's image-y to the predicted
+        #     row position at its image-x.
+        #   - else image-midline (y < h/2 → far). Gap-split is intentionally
+        #     NOT used here: with few CCs, within-row spread (rows have
+        #     slope) can equal between-row separation, and we can't tell
+        #     which is which without a seed pair or history. Midline is
+        #     blunt but doesn't fabricate a row split that isn't there.
+        unlabeled = [ci for ci in range(len(cc_u))
+                     if labels[ci] is None and cc_yl[ci] is not None]
+        for ci in unlabeled:
+            cx, cy = float(cc_u[ci, 0]), float(cc_u[ci, 1])
+            if prev_far is not None and prev_near is not None:
+                far_y_h = prev_far[0] * cx + prev_far[1]
+                near_y_h = prev_near[0] * cx + prev_near[1]
+                labels[ci] = ('far' if abs(cy - far_y_h) < abs(cy - near_y_h)
+                              else 'near')
+            elif prev_far is not None:
+                far_y_h = prev_far[0] * cx + prev_far[1]
+                labels[ci] = 'far' if abs(cy - far_y_h) < abs(cy - h / 2) else 'near'
+            elif prev_near is not None:
+                near_y_h = prev_near[0] * cx + prev_near[1]
+                labels[ci] = 'near' if abs(cy - near_y_h) < abs(cy - h / 2) else 'far'
+            else:
+                labels[ci] = 'far' if cy < h / 2 else 'near'
+
+    # Fit row lines from labeled centroids — LSQ when 2+, else None.
+    far_pts_idx = [ci for ci in range(len(cc_u)) if labels[ci] == 'far']
+    near_pts_idx = [ci for ci in range(len(cc_u)) if labels[ci] == 'near']
+    far_row = None
+    near_row = None
+    if len(far_pts_idx) >= 2:
+        pts = np.array([cc_u[ci] for ci in far_pts_idx])
+        m, c = np.polyfit(pts[:, 0], pts[:, 1], 1)
+        far_row = (float(m), float(c))
+    if len(near_pts_idx) >= 2:
+        pts = np.array([cc_u[ci] for ci in near_pts_idx])
+        m, c = np.polyfit(pts[:, 0], pts[:, 1], 1)
+        near_row = (float(m), float(c))
+
+    state = ('both' if (far_row and near_row) else
+             'only_far' if far_row else
+             'only_near' if near_row else
+             'no_rows')
+    rows_dict = {'far': far_row, 'near': near_row, 'state': state}
+
+    # Emit one corr per labeled CC, snapped to yardline.
     out = []
-    m1, c1, in1 = ransac_line(pts_u, inlier_dist=2.0, min_inliers=20)
-    if m1 is None:
-        return []
-    out.append((m1, c1))
-    rem = pts_u[~in1]
-    if len(rem) >= 20:
-        m2, c2, in2 = ransac_line(rem, inlier_dist=2.0, min_inliers=20)
-        if m2 is not None:
-            out.append((m2, c2))
-    return out
+    for ci in range(len(cc_u)):
+        if labels[ci] is None:
+            continue
+        j = cc_yl[ci]
+        if j is None:
+            continue
+        g = int(g_index[j])
+        x_ngs = g0_x + yd_per_grid * g
+        if not (g0_lo <= x_ngs <= g0_hi):
+            continue
+        cy = float(cc_u[ci, 1])
+        fit = fits_kept[j]
+        cx_snapped = fit['a'] + fit['b'] * cy
+        if not (0 <= cx_snapped < w and 0 <= cy < h):
+            continue
+        y_field = HASH_Y_FAR if labels[ci] == 'far' else HASH_Y_NEAR
+        out.append({
+            "pixel_u": np.array([cx_snapped, cy], dtype=np.float64),
+            "field": np.array([x_ngs, y_field], dtype=np.float64),
+            "kind": f"{labels[ci]}_hash",
+            "label": f"{labels[ci]}_hash@g{g:+d}",
+        })
+    return rows_dict, out
 
 
 def yardline_x_at_y(fit, y):
@@ -408,8 +590,13 @@ def discover_g0(cap, n_total, intr, undist_map_x, undist_map_y,
             if init is None:
                 fi += 1; continue
             fits_kept, g_index, _ = init
-        rows_raw = detect_hash_rows(hash_, intr)
-        rows = hash_tracker.observe(rows_raw)
+        rows, _hash_corrs = compute_hash_data(
+            hash_, fits_kept, g_index, 20.0, intr,
+            hash_tracker.far, hash_tracker.near, image_w, image_h,
+            g0_lo=NGS_X_LEFT_GOAL, g0_hi=NGS_X_RIGHT_GOAL,
+            yd_per_grid=YD_PER_GRID)
+        if rows['far'] is not None: hash_tracker.far = rows['far']
+        if rows['near'] is not None: hash_tracker.near = rows['near']
         num_mask_d = painted_numbers.predict_mask(frame, num_weights, device_str)
         if undist_map_x is not None:
             num_mask_u = cv2.remap(num_mask_d, undist_map_x, undist_map_y,
@@ -581,31 +768,21 @@ def main():
         else:
             fits_kept, g_index, _, _ = yl_tracker.update(fits_yl, cy)
 
-        rows_raw = detect_hash_rows(hash_, intr)
-        rows = hash_tracker.observe(rows_raw)
+        rows, hash_corrs = compute_hash_data(
+            hash_, fits_kept, g_index, g0_x, intr,
+            hash_tracker.far, hash_tracker.near, w, h,
+            g0_lo=NGS_X_LEFT_GOAL, g0_hi=NGS_X_RIGHT_GOAL,
+            yd_per_grid=YD_PER_GRID)
+        if rows['far'] is not None: hash_tracker.far = rows['far']
+        if rows['near'] is not None: hash_tracker.near = rows['near']
         phase_t['line_hash_proc'] += time.time() - t0
 
-        # Build correspondences
+        # Build correspondences. Hash corrs come from compute_hash_data
+        # above (one keypoint per painted hash mark, snapped to yardline,
+        # labeled near/far via pair-gold + propagation, with row lines fit
+        # through labeled centroids — no manufactured slope from singles).
         t_corrs = time.time()
-        corrs = []
-        for i, fit in enumerate(fits_kept):
-            g = int(g_index[i])
-            x_ngs = g0_x + YD_PER_GRID * g
-            if not (NGS_X_LEFT_GOAL <= x_ngs <= NGS_X_RIGHT_GOAL):
-                continue
-            for label, row in (("far", rows['far']), ("near", rows['near'])):
-                if row is None: continue
-                pt = line_intersect_yardline_row(fit, row)
-                if pt is None: continue
-                px, py = pt
-                if not (0 <= px < w and 0 <= py < h): continue
-                y_field = HASH_Y_FAR if label == "far" else HASH_Y_NEAR
-                corrs.append({
-                    "pixel_u": np.array([px, py], dtype=np.float64),
-                    "field": np.array([x_ngs, y_field], dtype=np.float64),
-                    "kind": f"{label}_hash",
-                    "label": f"{label}_hash@g{g:+d}",
-                })
+        corrs = list(hash_corrs)
         for sf in fits_sl:
             for i, fit in enumerate(fits_kept):
                 g = int(g_index[i])
@@ -700,6 +877,49 @@ def main():
         print(f"  clip LOST from frame {lost_from} "
               f"({n_done - lost_from} frames; ≥3 consecutive carries)")
 
+    # ── Constraint quality flag ─────────────────────────────────────────
+    # Under-constrained clips (e.g. close-up endzone shots where corrs all
+    # cluster on the bottom-right of the frame) produce H solutions that
+    # waver in the unconstrained region. Flag them so downstream batch
+    # processing can mark the clip as questionable. Bank residual and
+    # divergence are NOT useful here — they can both report "tight" on
+    # under-constrained clips because the H is overfitting a small corr
+    # set. The reliable signals are spatial: how spread out the corrs are
+    # in field-x and how many of them there are.
+    if valid_until > 0:
+        ngs_x_ranges = []
+        n_corrs_per_frame = []
+        for mm in frame_meta[:valid_until]:
+            cs = mm["corrs"]
+            if cs:
+                xs = np.array([c["field"][0] for c in cs])
+                ngs_x_ranges.append(float(xs.max() - xs.min()))
+            else:
+                ngs_x_ranges.append(0.0)
+            n_corrs_per_frame.append(len(cs))
+        nxr = np.array(ngs_x_ranges)
+        ncf = np.array(n_corrs_per_frame)
+        mean_xr = float(nxr.mean())
+        mean_nc = float(ncf.mean())
+        pct_low_xr = float((nxr < 10).mean() * 100)
+        reasons = []
+        if mean_xr < 15:
+            reasons.append(f"mean ngs_x_range={mean_xr:.1f}yd<15")
+        if mean_nc < 6:
+            reasons.append(f"mean n_corrs={mean_nc:.1f}<6")
+        if pct_low_xr > 30:
+            reasons.append(f"{pct_low_xr:.0f}% frames have x_spread<10yd")
+        questionable = bool(reasons)
+        if questionable:
+            print(f"  WARN rectification QUESTIONABLE — {'; '.join(reasons)}")
+            print(f"       (under-constrained: corrs spatially concentrated, "
+                  f"H wavers in unconstrained regions)")
+        else:
+            print(f"  rectification quality OK — "
+                  f"mean ngs_x_range={mean_xr:.1f}yd, "
+                  f"mean n_corrs={mean_nc:.1f}, "
+                  f"low-spread frames={pct_low_xr:.0f}%")
+
     # Smooth H matrices over the valid range (Savitzky-Golay).
     for mm in frame_meta:
         mm["H"] = mm["H_raw"]
@@ -793,15 +1013,23 @@ def main():
                 project_field_grid(canvas, np.linalg.inv(H), w, h)
             except np.linalg.LinAlgError:
                 pass
+        # Colors keyed by kind. Near vs far cleanly separated so hash-row
+        # mis-assignments are immediately visible:
+        #   near_hash      red       far_hash      blue
+        #   sideline_near  orange    sideline_far  purple
+        #   number_near    cyan      number_far    yellow
+        kp_colors = {
+            "near_hash":     (60, 60, 255),    # red
+            "far_hash":      (255, 80, 80),    # blue
+            "sideline_near": (60, 165, 255),   # orange
+            "sideline_far":  (200, 80, 255),   # purple
+            "number_near":   (255, 220, 60),   # cyan
+            "number_far":    (60, 220, 255),   # yellow
+        }
         for c in mm["corrs"]:
             px_pt = c["pixel_u"]
             kind = c.get("kind", "")
-            if kind == "number_near":
-                col = (255, 220, 60)   # cyan-ish — near number keypoints
-            elif kind == "number_far":
-                col = (60, 220, 255)   # yellow — far number keypoints
-            else:
-                col = (60, 220, 60)    # green — yardline×hash / yardline×sideline
+            col = kp_colors.get(kind, (60, 220, 60))
             cv2.circle(canvas,
                         (int(round(px_pt[0])), int(round(px_pt[1]))),
                         3, col, -1)

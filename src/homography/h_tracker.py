@@ -30,7 +30,7 @@ from src.homography.keypoint_track_bank import KeypointTrackBank
 RANSAC_REPROJ_PX = 4.0
 MIN_CORRS_FOR_H = 4    # cv2.findHomography minimum; 4 non-collinear pts → H
 
-FULL_H_SANITY_MAX_YD = 2.0
+FULL_H_SANITY_MAX_YD = 0.5
 
 DELTA_MAX_SCALE = 1.8
 DELTA_MAX_ROT_DEG = 3.0
@@ -41,33 +41,41 @@ DELTA_MAX_TRANS_PX = 400
 # canonical field position. Catches false hashes + mis-classified hashes
 # before they get into RANSAC. Generous enough to absorb 1 frame of camera
 # motion at 30 fps.
-PREFILTER_TOL_YD = 1.0
+PREFILTER_TOL_YD = 0.5
 
-# Degenerate-config check: collapse correspondences onto NGS-y rows (round
-# to nearest 0.5yd to bucket the discrete NGS-y values like 0, 14, 23.58,
-# 29.75, 39.33, 53.33). cv2.findHomography needs 4 points with no 3
-# collinear in either source or target plane; if RANSAC's only 4-subsets
-# include 3+ points all on the same NGS-y row, the H is rank-deficient
-# even though findHomography returns a value. We require at least 2 points
-# OFF the most-populated NGS-y row.
-DEGEN_NGS_Y_BUCKET_YD = 0.5
-DEGEN_MIN_OFF_DOMINANT_ROW = 2
+# Degenerate-config check: collapse correspondences onto NGS-y rows OR
+# NGS-x columns (round to nearest 0.5yd to bucket discrete row positions
+# like 0, 14, 23.58, 29.75, 39.33, 53.33 and column positions which are
+# integer yardlines). cv2.findHomography needs 4 points with no 3
+# collinear in either source or target plane; if 3+ points all share a
+# single field-plane row OR column, RANSAC's 4-subsets include collinear
+# triples and the H is rank-deficient even though findHomography returns
+# a value. We require at least 2 points OFF the most-populated row AND
+# at least 2 points OFF the most-populated column.
+DEGEN_BUCKET_YD = 0.5
+DEGEN_MIN_OFF_DOMINANT = 2
 
 
 def is_degenerate_for_h(corrs):
     """True if correspondences are degenerate for `cv2.findHomography`:
-    too many points share a single NGS-y row (collinear in target plane).
+    too many points share a single NGS-y row OR a single NGS-x column
+    (collinear in target plane).
 
     cv2.findHomography returns a numerically-unstable H rather than failing
     cleanly when 3+ points are collinear among the 4-subsets RANSAC samples.
-    We need at least DEGEN_MIN_OFF_DOMINANT_ROW points off the most-populated
-    NGS-y row so RANSAC has at least one non-degenerate 4-subset."""
+    We require at least DEGEN_MIN_OFF_DOMINANT points off the most-populated
+    NGS-y row AND at least that many off the most-populated NGS-x column,
+    so RANSAC has at least one non-degenerate 4-subset along each axis."""
     if len(corrs) < MIN_CORRS_FOR_H:
         return True
-    bucket = lambda y: round(y / DEGEN_NGS_Y_BUCKET_YD) * DEGEN_NGS_Y_BUCKET_YD
-    counts = Counter(bucket(c["field"][1]) for c in corrs)
-    max_in_row = max(counts.values())
-    return (len(corrs) - max_in_row) < DEGEN_MIN_OFF_DOMINANT_ROW
+    bucket = lambda v: round(v / DEGEN_BUCKET_YD) * DEGEN_BUCKET_YD
+    rows = Counter(bucket(c["field"][1]) for c in corrs)
+    cols = Counter(bucket(c["field"][0]) for c in corrs)
+    if (len(corrs) - max(rows.values())) < DEGEN_MIN_OFF_DOMINANT:
+        return True
+    if (len(corrs) - max(cols.values())) < DEGEN_MIN_OFF_DOMINANT:
+        return True
+    return False
 
 
 def solve_h(corrs):

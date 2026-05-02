@@ -262,10 +262,18 @@ class NumberSideTracker:
 # ── Per-group inside-edge keypoint ─────────────────────────────────────────
 def get_reference_slope(side: str, hash_rows: dict, sideline_fits,
                           image_w: int, image_h: int):
-    """Image-space slope of 'constant NGS y' lines on this side. Hash row
-    is the closest NGS-y line to the painted number row → best reference.
-    Sideline is the fallback when hashes aren't detected. Returns None if
-    neither is available.
+    """Image-space slope of 'constant NGS y' lines on this side.
+
+    Fallback chain (in order):
+      1. Same-side hash row — closest NGS-y line to the painted number row,
+         best slope reference.
+      2. Same-side sideline — one-line offset but parallel-ish in field
+         coords.
+      3. Other-side hash row — last resort. Hash rows are parallel in NGS
+         coords; under typical broadcast camera angles their image slopes
+         are within a few percent of each other.
+
+    Returns None only if all three are unavailable.
 
     sideline_fits format: list of {"a", "b", ...} where the line equation is
     y = a + b·x. So sideline slope = b.
@@ -277,6 +285,8 @@ def get_reference_slope(side: str, hash_rows: dict, sideline_fits,
             y_at_center = sf["a"] + sf["b"] * (image_w / 2)
             if y_at_center < image_h / 2:           # top half = far sideline
                 return float(sf["b"])
+        if hash_rows.get("near") is not None:
+            return float(hash_rows["near"][0])
     else:                                            # near
         if hash_rows.get("near") is not None:
             return float(hash_rows["near"][0])
@@ -284,6 +294,8 @@ def get_reference_slope(side: str, hash_rows: dict, sideline_fits,
             y_at_center = sf["a"] + sf["b"] * (image_w / 2)
             if y_at_center > image_h / 2:           # bottom half = near sideline
                 return float(sf["b"])
+        if hash_rows.get("far") is not None:
+            return float(hash_rows["far"][0])
     return None
 
 
