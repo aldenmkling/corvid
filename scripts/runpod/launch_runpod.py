@@ -240,6 +240,12 @@ def upload_dataset(args):
     elif tt == 'unet-unified':
         train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_unet_unified.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_unet_runpod.txt")
+    elif tt == 'unet-numbers':
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_unet_numbers.py")
+        requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_unet_runpod.txt")
+    elif tt == 'number-classifier':
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_number_classifier.py")
+        requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_unet_runpod.txt")
     else:
         train_script = os.path.join(PROJECT_ROOT, "scripts", "training", "train_rfdetr.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "training", "requirements_runpod.txt")
@@ -265,7 +271,7 @@ def upload_dataset(args):
     # AppleDouble sidecars, which otherwise pollute the extracted dataset on
     # Linux and trip up any glob that matches `*.jpg` or `*.png`.
     tar_env = {**os.environ, "COPYFILE_DISABLE": "1"}
-    if getattr(args, 'training_type', 'rfdetr') in ('hrnet', 'unet', 'unet-hash', 'unet-unified') and has_split:
+    if getattr(args, 'training_type', 'rfdetr') in ('hrnet', 'unet', 'unet-hash', 'unet-unified', 'unet-numbers') and has_split:
         with tempfile.TemporaryDirectory() as staging:
             stage_root = os.path.join(staging, dataset_name)
             os.makedirs(stage_root)
@@ -324,6 +330,8 @@ def upload_dataset(args):
         "unet":          "requirements_unet_runpod.txt",
         "unet-hash":     "requirements_unet_runpod.txt",
         "unet-unified":  "requirements_unet_runpod.txt",
+        "unet-numbers":  "requirements_unet_runpod.txt",
+        "number-classifier": "requirements_unet_runpod.txt",
     }.get(_tt, "requirements_runpod.txt")
     print("  Installing dependencies (this can take a few minutes)...")
     proc = subprocess.Popen(
@@ -449,6 +457,32 @@ def run_training(args):
         if getattr(args, 'encoder', None):
             train_args += f" --encoder {args.encoder}"
         train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_unet_unified.py{train_args}"
+    elif getattr(args, 'training_type', 'rfdetr') == 'unet-numbers':
+        dataset_basename = os.path.basename(os.path.abspath(args.dataset).rstrip(os.sep))
+        train_args = (
+            f" --dataset {dataset_basename}"
+            f" --epochs {args.epochs}"
+            f" --batch-size {args.batch_size}"
+            f" --lr {getattr(args, 'lr', 5e-4)}"
+            f" --output /workspace/output"
+            f" --device cuda"
+        )
+        if getattr(args, 'encoder', None):
+            train_args += f" --encoder {args.encoder}"
+        train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_unet_numbers.py{train_args}"
+    elif getattr(args, 'training_type', 'rfdetr') == 'number-classifier':
+        dataset_basename = os.path.basename(os.path.abspath(args.dataset).rstrip(os.sep))
+        train_args = (
+            f" --dataset {dataset_basename}"
+            f" --epochs {args.epochs}"
+            f" --batch-size {args.batch_size}"
+            f" --lr {getattr(args, 'lr', 1e-3)}"
+            f" --output /workspace/output"
+            f" --device cuda"
+        )
+        if getattr(args, 'encoder', None):
+            train_args += f" --encoder {args.encoder}"
+        train_cmd = f"cd /workspace && source venv/bin/activate && python -u train_number_classifier.py{train_args}"
     else:
         train_args = (
             f" --dataset dataset"
@@ -485,6 +519,8 @@ def run_training(args):
         "unet":          "train_unet_lines.py",
         "unet-hash":     "train_unet_hash.py",
         "unet-unified":  "train_unet_unified.py",
+        "unet-numbers":  "train_unet_numbers.py",
+        "number-classifier": "train_number_classifier.py",
     }.get(_tt, "train_rfdetr.py")
     result = subprocess.run(
         ["ssh"] + ssh_opts + [ssh_target, f"pgrep -f {script_name}"],
@@ -523,7 +559,7 @@ def check_training(args=None):
 
     # Check if training is still running (match either training script)
     proc_check = subprocess.run(
-        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f 'train_(rfdetr|hrnet_keypoints|unet_lines|unet_hash|unet_unified)\\.py'"],
+        ["ssh"] + ssh_opts + [ssh_target, "pgrep -f 'train_(rfdetr|hrnet_keypoints|unet_lines|unet_hash|unet_unified|unet_numbers|number_classifier)\\.py'"],
         capture_output=True, text=True,
     )
     is_running = proc_check.returncode == 0
@@ -596,6 +632,14 @@ def download_weights(args):
     elif training_type == "unet-unified":
         weight_files = ["best.pth", "last.pth"]
         prefix = "unet_unified"
+        ext = ".pth"
+    elif training_type == "unet-numbers":
+        weight_files = ["best.pth", "last.pth"]
+        prefix = "unet_numbers"
+        ext = ".pth"
+    elif training_type == "number-classifier":
+        weight_files = ["best.pth", "last.pth"]
+        prefix = "number_classifier"
         ext = ".pth"
     elif training_type == "unet":
         weight_files = ["best.pth", "last.pth"]
@@ -740,7 +784,7 @@ def main():
 
     # Training config
     parser.add_argument("--training-type", default="rfdetr",
-                        choices=["rfdetr", "hrnet", "unet", "unet-hash", "unet-unified"],
+                        choices=["rfdetr", "hrnet", "unet", "unet-hash", "unet-unified", "unet-numbers", "number-classifier"],
                         help="Model to train (default: rfdetr)")
     parser.add_argument("--dataset", default=None, help="Local path to dataset (auto-set per training type)")
     parser.add_argument("--epochs", type=int, default=None, help="Training epochs")
@@ -813,6 +857,27 @@ def main():
             args.batch_size = 16
         if args.encoder is None:
             args.encoder = "mit_b0"
+    elif args.training_type == "unet-numbers":
+        if args.dataset is None:
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "yardline_numbers", "dataset_round1")
+        if args.epochs is None:
+            args.epochs = 80
+        if args.batch_size is None:
+            args.batch_size = 16
+        if args.encoder is None:
+            args.encoder = "mit_b0"
+        if args.lr == 1e-3:
+            args.lr = 5e-4
+    elif args.training_type == "number-classifier":
+        if args.dataset is None:
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "number_classifier", "round1")
+        if args.epochs is None:
+            args.epochs = 60
+        if args.batch_size is None:
+            args.batch_size = 64
+        if args.encoder is None:
+            args.encoder = "mit_b0"
+        # default lr is 1e-3 — leave as-is
     else:
         if args.dataset is None:
             args.dataset = os.path.join(PROJECT_ROOT, "data", "player_detection")

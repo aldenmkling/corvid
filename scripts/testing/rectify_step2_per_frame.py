@@ -25,6 +25,7 @@ import argparse
 import os
 import sys
 import time
+from collections import defaultdict
 
 import cv2
 import numpy as np
@@ -40,6 +41,7 @@ from src.homography.grid_solver_v2 import (
 )
 from src.homography.distortion import CameraIntrinsics, undistort_points
 from src.homography.field_model import HASH_Y_NEAR, HASH_Y_FAR, FIELD_WIDTH
+from src.homography import painted_numbers
 
 import subprocess
 import shutil
@@ -51,9 +53,10 @@ from rebuild_step4_hashes_v2 import (
 )
 from rebuild_step8_homography import HomographyTrackerLite, detect_lost
 
-# Two-specialist setup.
+# Specialists (number UNet added to existing line + hash setup).
 LINE_WEIGHTS = os.path.join(PROJECT_ROOT, "models/unet_line_stage2_last.pth")
 HASH_WEIGHTS = os.path.join(PROJECT_ROOT, "models/unet_hash_round3_last.pth")
+NUMBER_WEIGHTS = os.path.join(PROJECT_ROOT, "models/unet_numbers_last.pth")
 UNET_INPUT_H, UNET_INPUT_W = 512, 896
 IMAGENET_MEAN_NP = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD_NP = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -383,20 +386,89 @@ def project_field_grid(canvas, H_field_to_img, w, h):
                  color, 1, cv2.LINE_AA)
 
 
+def discover_g0(cap, n_total, intr, undist_map_x, undist_map_y,
+                  line_weights, hash_weights, num_weights, classifier_weights,
+                  device_str, image_h, image_w,
+                  stride=painted_numbers.G0_SAMPLE_STRIDE):
+    """Pre-scan: sample frames at stride, classify painted-number groups,
+    accumulate confidence-weighted votes for g0_NGS_x. Returns
+    G0Estimator.summary() — frozen=True when confident, else fallback
+    best-guess. Reuses bootstrap intrinsics but uses fresh trackers so the
+    main pass-1 is unaffected by this scan."""
+    yl_tracker = YardlineTracker(g_min=-30, g_max=30, frame_h=image_h)
+    hash_tracker = HashRowTracker(image_w=image_w)
+    num_tracker = painted_numbers.NumberSideTracker()
+    estimator = painted_numbers.G0Estimator()
+    classifier, cls_classes = painted_numbers.load_classifier(
+        classifier_weights, torch.device(device_str))
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    t0 = time.time()
+    fi = 0
+    while fi < n_total:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if fi % stride != 0:
+            fi += 1; continue
+        yard, side, hash_ = run_specialists(frame, line_weights, hash_weights,
+                                                device_str)
+        yl = group_yardline_pixels_cc(yard)
+        sl = group_sideline_pixels(side)
+        fits_yl = [fit_yardline_undistorted(g.pixels, intr) for g in yl]
+        fits_sl = [fit_sideline_undistorted(g.pixels, intr) for g in sl]
+        if yl_tracker.last_fit:
+            fits_kept, g_index, _, _ = yl_tracker.update(fits_yl, image_h / 2.0)
+        else:
+            init = yl_tracker.init_from(fits_yl, image_h / 2.0)
+            if init is None:
+                fi += 1; continue
+            fits_kept, g_index, _ = init
+        rows_raw = detect_hash_rows(hash_, intr)
+        rows = hash_tracker.observe(rows_raw)
+        num_mask_d = painted_numbers.predict_mask(frame, num_weights, device_str)
+        if undist_map_x is not None:
+            num_mask_u = cv2.remap(num_mask_d, undist_map_x, undist_map_y,
+                                     cv2.INTER_NEAREST)
+        else:
+            num_mask_u = num_mask_d
+        _, dbg = painted_numbers.process_frame(
+            num_mask_u, fits_kept, rows, fits_sl, g_index,
+            image_h, image_w, num_tracker)
+        groups = dbg["groups"]
+        crops, refs = [], []
+        for grp in groups:
+            if grp.get("yardline_idx", -1) < 0: continue
+            if grp.get("side") not in ("near", "far"): continue
+            crop = painted_numbers.crop_group_to_64(grp, image_h, image_w)
+            if crop is None: continue
+            crops.append(crop); refs.append(grp)
+        if crops:
+            labels, confs = painted_numbers.classify_crops(
+                crops, classifier, torch.device(device_str))
+            g_indices = [grp["yardline_g_index"] for grp in refs]
+            if estimator.update(g_indices, labels, confs, frame_idx=fi):
+                fi += 1; break
+        fi += 1
+    summary = estimator.summary()
+    summary["elapsed_s"] = time.time() - t0
+    return summary
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--clip", default=os.path.join(
         PROJECT_ROOT, "videos/clips/2019102712/play_046/sideline.mp4"))
-    ap.add_argument("--g0-ngs-x", type=float, default=G0_NGS_X)
+    ap.add_argument("--g0-ngs-x", type=float, default=None,
+                     help="leftmost yardline NGS x. If omitted, auto-detect "
+                          "via the painted-number classifier (pre-scan).")
+    ap.add_argument("--classifier-weights", default=os.path.join(
+        PROJECT_ROOT, "models/number_classifier_best.pth"))
     ap.add_argument("--out", default=os.path.join(
         PROJECT_ROOT, "output/rebuild/rectify_step2_overlay.mp4"))
     ap.add_argument("--device", default="mps")
     ap.add_argument("--max-frames", type=int, default=None)
     args = ap.parse_args()
-
-    g0_x = args.g0_ngs_x
-    g_min = int((NGS_X_LEFT_GOAL - g0_x) / YD_PER_GRID)
-    g_max = int((NGS_X_RIGHT_GOAL - g0_x) / YD_PER_GRID)
 
     cap = cv2.VideoCapture(args.clip)
     if not cap.isOpened():
@@ -435,11 +507,54 @@ def main():
     dist = np.array([k1, 0.0, 0, 0, 0], dtype=np.float64)
     print(f"  bootstrap k1 = {k1:+.4f}")
 
+    # Cache the undistortion remap maps. k1 is fixed per clip, so the maps
+    # are constant across all frames; cv2.remap with cached maps is much
+    # faster than cv2.undistort (which recomputes the maps each call).
+    if abs(k1) > 1e-6:
+        undist_map_x, undist_map_y = cv2.initUndistortRectifyMap(
+            K, dist, None, K, (w, h), cv2.CV_32FC1)
+    else:
+        undist_map_x = undist_map_y = None
+
+    # ── Resolve g0 (manual flag or classifier pre-scan) ─────────────────
+    if args.g0_ngs_x is not None:
+        g0_x = float(args.g0_ngs_x)
+        print(f"  g0 = {g0_x:.1f} (manual)")
+    else:
+        print(f"  g0 = auto (pre-scanning clip with number classifier)")
+        s = discover_g0(cap, n_frames, intr, undist_map_x, undist_map_y,
+                          LINE_WEIGHTS, HASH_WEIGHTS, NUMBER_WEIGHTS,
+                          args.classifier_weights, args.device, h, w)
+        if s["g0"] is None:
+            print(f"    [g0 prescan] no painted-number votes anywhere — "
+                  f"falling back to default g0={G0_NGS_X}")
+            g0_x = G0_NGS_X
+        elif s["frozen"]:
+            print(f"    [g0 prescan] frozen at frame {s['frame']}  "
+                  f"g0={s['g0']:.1f}  score={s['score']:.2f}  "
+                  f"voted={s['n_voted']}/{s['n_seen']}  "
+                  f"({s['elapsed_s']:.1f}s)")
+            g0_x = float(s["g0"])
+        else:
+            print(f"    [g0 prescan] WARN never froze — best-guess "
+                  f"g0={s['g0']:.1f}  score={s['score']:.2f}  "
+                  f"runner={s['runner_score']:.2f}  margin={s['margin']:.2f}×  "
+                  f"voted={s['n_voted']}/{s['n_seen']}  "
+                  f"({s['elapsed_s']:.1f}s)")
+            g0_x = float(s["g0"])
+    g_min = int((NGS_X_LEFT_GOAL - g0_x) / YD_PER_GRID)
+    g_max = int((NGS_X_RIGHT_GOAL - g0_x) / YD_PER_GRID)
+
     yl_tracker = YardlineTracker(g_min=g_min, g_max=g_max, frame_h=h)
     hash_tracker = HashRowTracker(image_w=w)
     h_tracker = HomographyTrackerLite()
+    number_tracker = painted_numbers.NumberSideTracker()
     methods = []
     method_counts = {"full": 0, "delta": 0, "carry": 0, "none": 0}
+
+    # Per-phase timing accumulators
+    phase_t = defaultdict(float)
+    t_overall_start = time.time()
 
     fits_yl0 = [fit_yardline_undistorted(g.pixels, intr) for g in yl0]
     yl_tracker.init_from(fits_yl0, cy)
@@ -455,14 +570,18 @@ def main():
         if not ok or (args.max_frames and n_done >= args.max_frames):
             break
 
+        t0 = time.time()
         yard, side, hash_ = run_specialists(
             frame, LINE_WEIGHTS, HASH_WEIGHTS, args.device)
+        phase_t['unet_line_hash'] += time.time() - t0
+
+        t0 = time.time()
         yl = group_yardline_pixels_cc(yard)
         sl = group_sideline_pixels(side)
-        if abs(k1) > 1e-6:
-            yard_u_m = cv2.undistort(yard, K, dist)
-            side_u_m = cv2.undistort(side, K, dist)
-            hash_u_m = cv2.undistort(hash_, K, dist)
+        if undist_map_x is not None:
+            yard_u_m = cv2.remap(yard, undist_map_x, undist_map_y, cv2.INTER_NEAREST)
+            side_u_m = cv2.remap(side, undist_map_x, undist_map_y, cv2.INTER_NEAREST)
+            hash_u_m = cv2.remap(hash_, undist_map_x, undist_map_y, cv2.INTER_NEAREST)
         else:
             yard_u_m, side_u_m, hash_u_m = yard, side, hash_
 
@@ -480,8 +599,10 @@ def main():
 
         rows_raw = detect_hash_rows(hash_, intr)
         rows = hash_tracker.observe(rows_raw)
+        phase_t['line_hash_proc'] += time.time() - t0
 
         # Build correspondences
+        t_corrs = time.time()
         corrs = []
         for i, fit in enumerate(fits_kept):
             g = int(g_index[i])
@@ -521,14 +642,53 @@ def main():
                     "label": f"{sl_label}sl×g{g:+d}",
                 })
 
+        phase_t['corrs_yl_hash_sl'] += time.time() - t_corrs
+
+        # Painted-number keypoints (inside-edge tangent ∩ yardline). All
+        # geometry happens in undistorted-image space — same convention as
+        # yardline + hash fits — so the keypoints can be added directly to
+        # corrs[i]["pixel_u"] without further undistortion.
+        t_num_unet = time.time()
+        num_mask_d = painted_numbers.predict_mask(
+            frame, NUMBER_WEIGHTS, args.device)
+        phase_t['unet_number'] += time.time() - t_num_unet
+        t_num_proc = time.time()
+        if undist_map_x is not None:
+            num_mask_u = cv2.remap(num_mask_d, undist_map_x, undist_map_y,
+                                     cv2.INTER_NEAREST)
+        else:
+            num_mask_u = num_mask_d
+        num_kps, num_dbg = painted_numbers.process_frame(
+            num_mask_u, fits_kept, rows, fits_sl, g_index, h, w, number_tracker)
+        n_num_kps_added = 0
+        for kp in num_kps:
+            yl_idx = kp["yardline_idx"]
+            if yl_idx < 0 or yl_idx >= len(g_index): continue
+            g = int(g_index[yl_idx])
+            x_ngs = g0_x + YD_PER_GRID * g
+            if not (NGS_X_LEFT_GOAL <= x_ngs <= NGS_X_RIGHT_GOAL):
+                continue
+            corrs.append({
+                "pixel_u": np.array(kp["image_xy"], dtype=np.float64),
+                "field": np.array([x_ngs, kp["ngs_y"]], dtype=np.float64),
+                "kind": f"number_{kp['side']}",
+                "label": f"num_{kp['side']}@g{g:+d}",
+            })
+            n_num_kps_added += 1
+        phase_t['number_proc'] += time.time() - t_num_proc
+
+        t_h = time.time()
         r = h_tracker.update(corrs, frame_idx=n_done)
+        phase_t['h_solve'] += time.time() - t_h
         method_counts[r["method"]] = method_counts.get(r["method"], 0) + 1
         methods.append(r["method"])
 
         frame_meta.append({
-            "yard_bytes": cv2.imencode(".png", yard_u_m)[1].tobytes(),
-            "side_bytes": cv2.imencode(".png", side_u_m)[1].tobytes(),
-            "hash_bytes": cv2.imencode(".png", hash_u_m)[1].tobytes(),
+            # Raw arrays — PNG encode/decode roundtrip per frame is
+            # ~10ms per mask × 3 masks × N frames; just hold them.
+            "yard_u_m": yard_u_m,
+            "side_u_m": side_u_m,
+            "hash_u_m": hash_u_m,
             "fits_kept": fits_kept,
             "g_index": g_index,
             "fits_sl": fits_sl,
@@ -545,7 +705,8 @@ def main():
             print(f"  pass1 frame {n_done}/{n_frames}  "
                   f"full={method_counts.get('full', 0)}  "
                   f"delta={method_counts.get('delta', 0)}  "
-                  f"carry={method_counts.get('carry', 0)}")
+                  f"carry={method_counts.get('carry', 0)}  "
+                  f"num_kps@frame={n_num_kps_added}")
     cap.release()
 
     # ── Detect lost + smooth Hs ─────────────────────────────────────────
@@ -582,15 +743,20 @@ def main():
     n_written = 0
     n_h_ok = 0
     sum_inlier_frac = 0.0
+    pass2_t_start = time.time()
     for fi, mm in enumerate(frame_meta):
         if fi >= valid_until:
             break
+        t_p2 = time.time()
         ok, frame = cap2.read()
         if not ok: break
-        frame_u = cv2.undistort(frame, K, dist) if abs(k1) > 1e-6 else frame.copy()
-        yard_u_m = cv2.imdecode(np.frombuffer(mm["yard_bytes"], np.uint8), 0)
-        side_u_m = cv2.imdecode(np.frombuffer(mm["side_bytes"], np.uint8), 0)
-        hash_u_m = cv2.imdecode(np.frombuffer(mm["hash_bytes"], np.uint8), 0)
+        if undist_map_x is not None:
+            frame_u = cv2.remap(frame, undist_map_x, undist_map_y, cv2.INTER_LINEAR)
+        else:
+            frame_u = frame.copy()
+        yard_u_m = mm["yard_u_m"]
+        side_u_m = mm["side_u_m"]
+        hash_u_m = mm["hash_u_m"]
         H = mm["H"]
         method = mm["method"]
         n_inliers = mm["n_inliers"]
@@ -646,9 +812,16 @@ def main():
                 pass
         for c in mm["corrs"]:
             px_pt = c["pixel_u"]
+            kind = c.get("kind", "")
+            if kind == "number_near":
+                col = (255, 220, 60)   # cyan-ish — near number keypoints
+            elif kind == "number_far":
+                col = (60, 220, 255)   # yellow — far number keypoints
+            else:
+                col = (60, 220, 60)    # green — yardline×hash / yardline×sideline
             cv2.circle(canvas,
                         (int(round(px_pt[0])), int(round(px_pt[1]))),
-                        3, (60, 220, 60), -1)
+                        3, col, -1)
         method_color = {"full":  (100, 255, 100),
                          "delta": (0, 200, 255),
                          "carry": (60, 60, 255),
@@ -662,13 +835,18 @@ def main():
 
         rectified = render_rectified_frame(frame_u, H)
         out_frame = stack_frames(canvas, rectified)
+        t_write = time.time()
         writer.write(out_frame)
+        phase_t['pass2_write'] += time.time() - t_write
         n_written += 1
+        phase_t['pass2_render'] += (time.time() - t_p2) - (time.time() - t_write)
         if n_written % 30 == 0:
             print(f"  pass2 frame {n_written}/{valid_until}")
     cap2.release()
     writer.release()
+    phase_t['pass2_total'] = time.time() - pass2_t_start
 
+    total_wall = time.time() - t_overall_start
     print(f"  done: pass1 {n_done} frames, pass2 wrote {n_written}")
     print(f"  methods: full={method_counts.get('full', 0)}  "
           f"delta={method_counts.get('delta', 0)}  "
@@ -677,6 +855,23 @@ def main():
     print(f"  full-H frames: {n_h_ok}  "
           f"avg inlier frac {sum_inlier_frac/max(n_h_ok,1):.2f}")
     print(f"  out: {args.out}")
+    print(f"\n  ── Timing breakdown ({total_wall:.1f}s total) ──")
+    pass1_phases = ['unet_line_hash', 'line_hash_proc', 'corrs_yl_hash_sl',
+                     'unet_number', 'number_proc', 'h_solve']
+    p1_total = sum(phase_t[k] for k in pass1_phases)
+    print(f"  PASS 1 (per-frame, {n_done} frames): {p1_total:.1f}s "
+          f"({p1_total/max(n_done,1)*1000:.0f} ms/frame)")
+    for k in pass1_phases:
+        v = phase_t[k]
+        print(f"    {k:24s} {v:6.1f}s  ({v/max(p1_total,1e-9)*100:4.1f}%)  "
+              f"{v/max(n_done,1)*1000:5.1f} ms/frame")
+    p2_total = phase_t['pass2_total']
+    print(f"  PASS 2 (rendering, {n_written} frames): {p2_total:.1f}s "
+          f"({p2_total/max(n_written,1)*1000:.0f} ms/frame)")
+    print(f"    {'pass2_render':24s} {phase_t['pass2_render']:6.1f}s")
+    print(f"    {'pass2_write':24s} {phase_t['pass2_write']:6.1f}s")
+    other = total_wall - p1_total - p2_total
+    print(f"  OTHER (bootstrap + smooth + io): {other:.1f}s")
 
 
 if __name__ == "__main__":

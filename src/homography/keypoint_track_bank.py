@@ -58,11 +58,20 @@ SIDELINE_KINDS = ("sideline_near", "sideline_far")
 ALL_KINDS = HASH_KINDS + SIDELINE_KINDS
 
 _YARD_LINES = np.asarray(YARD_LINE_POSITIONS, dtype=np.float64)
+# Painted-number inside-edge NGS y values — kept consistent with
+# painted_numbers.NGS_Y_NEAR_INSIDE / NGS_Y_FAR_INSIDE (NUMBER_Y_NEAR + 1
+# = top of near digit toward field center; NUMBER_Y_FAR - 1 = bottom of
+# far digit toward field center).
+_NUMBER_NEAR_Y = 14.0
+_NUMBER_FAR_Y = FIELD_WIDTH - 14.0   # = 39.33
+
 _Y_BY_KIND = {
     "far_hash": HASH_Y_FAR,
     "near_hash": HASH_Y_NEAR,
     "sideline_near": 0.0,
     "sideline_far": FIELD_WIDTH,
+    "number_near": _NUMBER_NEAR_Y,
+    "number_far": _NUMBER_FAR_Y,
 }
 
 

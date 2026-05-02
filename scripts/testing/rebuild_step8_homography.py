@@ -63,6 +63,15 @@ DELTA_MAX_TRANS_PX = 400
 # before they get into RANSAC. Generous enough to absorb 1 frame of camera
 # motion at 30 fps.
 PREFILTER_TOL_YD = 1.0
+# Degenerate-config check: collapse correspondences onto NGS-y rows (round
+# to nearest 0.5yd to bucket the discrete NGS-y values like 0, 14, 23.58,
+# 29.75, 39.33, 53.33). cv2.findHomography needs 4 points with no 3
+# collinear in either source or target plane; if RANSAC's only 4-subsets
+# include 3+ points all on the same NGS-y row, the H is rank-deficient
+# even though findHomography returns a value. We require at least 2 points
+# OFF the most-populated NGS-y row.
+DEGEN_NGS_Y_BUCKET_YD = 0.5
+DEGEN_MIN_OFF_DOMINANT_ROW = 2
 
 
 def build_correspondences(yl_fits, g_index, hashes, intersections,
@@ -129,10 +138,29 @@ def detect_lost(methods, min_sustained_loss: int = 3):
     return None
 
 
+def is_degenerate_for_h(corrs):
+    """True if correspondences are degenerate for `cv2.findHomography`:
+    too many points share a single NGS-y row (collinear in target plane).
+
+    cv2.findHomography returns a numerically-unstable H rather than failing
+    cleanly when 3+ points are collinear among the 4-subsets RANSAC samples.
+    We need at least DEGEN_MIN_OFF_DOMINANT_ROW points off the most-populated
+    NGS-y row so RANSAC has at least one non-degenerate 4-subset."""
+    if len(corrs) < MIN_CORRS_FOR_H:
+        return True
+    from collections import Counter
+    bucket = lambda y: round(y / DEGEN_NGS_Y_BUCKET_YD) * DEGEN_NGS_Y_BUCKET_YD
+    counts = Counter(bucket(c["field"][1]) for c in corrs)
+    max_in_row = max(counts.values())
+    return (len(corrs) - max_in_row) < DEGEN_MIN_OFF_DOMINANT_ROW
+
+
 def solve_h(corrs):
     """RANSAC homography from undistorted-pixel → NGS field coords.
     Returns (H, inlier_mask, rmse_yd) or (None, None, None) on failure."""
     if len(corrs) < MIN_CORRS_FOR_H:
+        return None, None, None
+    if is_degenerate_for_h(corrs):
         return None, None, None
     src = np.array([c["pixel_u"] for c in corrs], dtype=np.float64).reshape(-1, 1, 2)
     dst = np.array([c["field"] for c in corrs], dtype=np.float64).reshape(-1, 1, 2)

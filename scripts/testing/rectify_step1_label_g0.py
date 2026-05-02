@@ -27,9 +27,8 @@ from src.homography.grid_solver_v2 import (
 )
 from src.homography.distortion import CameraIntrinsics, undistort_points
 
-from rebuild_step4_hashes_v2 import (
-    run_unified, total_mse, ransac_line, WEIGHTS,
-)
+from rebuild_step4_hashes_v2 import total_mse, ransac_line
+from rectify_step2_per_frame import run_specialists, LINE_WEIGHTS, HASH_WEIGHTS
 
 
 def main():
@@ -50,7 +49,7 @@ def main():
     focal = float(max(h, w))
     cx, cy = w / 2.0, h / 2.0
 
-    yard, side, hash_ = run_unified(frame, WEIGHTS, args.device)
+    yard, side, hash_ = run_specialists(frame, LINE_WEIGHTS, HASH_WEIGHTS, args.device)
     yl = group_yardline_pixels_cc(yard)
     sl = group_sideline_pixels(side)
     line_pts = [g.pixels for g in yl] + [g.pixels for g in sl]
