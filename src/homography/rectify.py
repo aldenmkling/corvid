@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Step 2 of the new rectify workflow: per-frame homography on a clip
-using the unified UNet + line-fit hash detection.
+"""Per-frame homography rectify pipeline (production entry point).
 
 Pipeline per frame:
-  1. Unified UNet → yard / side / hash masks.
+  1. Specialist UNets → yard / side / hash masks.
   2. Bootstrap: on frame 0, calibrate k1 from line pixels (cached
      thereafter). Build the YardlineTracker initial state.
   3. Undistort yardline + sideline groups, fit linear forms.
@@ -18,12 +17,11 @@ Pipeline per frame:
   7. cv2.findHomography RANSAC → H per frame.
   8. Render: undistorted frame + projected field grid overlay.
 
-Output: an MP4 with the overlay drawn over each frame.
+Run as: `python -m src.homography.rectify --clip <path> --out <path>`.
 """
 
 import argparse
 import os
-import sys
 import time
 from collections import defaultdict
 
@@ -32,9 +30,7 @@ import numpy as np
 import torch
 from scipy.optimize import minimize_scalar
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts/testing"))
+import segmentation_models_pytorch as smp
 
 from src.homography.grid_solver_v2 import (
     group_yardline_pixels_cc,
@@ -42,16 +38,20 @@ from src.homography.grid_solver_v2 import (
 from src.homography.distortion import CameraIntrinsics, undistort_points
 from src.homography.field_model import HASH_Y_NEAR, HASH_Y_FAR, FIELD_WIDTH
 from src.homography import painted_numbers
-
-import subprocess
-import shutil
-import segmentation_models_pytorch as smp
-from rebuild_full_clip_viz import YardlineTracker, group_sideline_pixels_cc as group_sideline_pixels
-from rebuild_step4_hashes_v2 import (
+from src.homography.line_fit import (
     total_mse, ransac_line,
     YARD_THRESH, SIDE_THRESH, HASH_THRESH, MAX_HASH_PIXELS,
+    fit_yardline_undistorted, fit_sideline_undistorted,
 )
-from rebuild_step8_homography import HomographyTrackerLite, detect_lost
+from src.homography.yardline_tracker import (
+    YardlineTracker, group_sideline_pixels_cc as group_sideline_pixels,
+)
+from src.homography.h_tracker import (
+    HomographyTrackerLite, detect_lost, smooth_hs,
+)
+
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Specialists (number UNet added to existing line + hash setup).
 LINE_WEIGHTS = os.path.join(PROJECT_ROOT, "models/unet_line_stage2_last.pth")
@@ -278,22 +278,6 @@ class HashRowTracker:
 
 
 # ── Per-frame helpers ─────────────────────────────────────────────────────
-def fit_yardline_undistorted(pixels: np.ndarray, intr: CameraIntrinsics):
-    pts_u = undistort_points(pixels.astype(np.float64), intr)
-    ys, xs = pts_u[:, 1], pts_u[:, 0]
-    b, a = np.polyfit(ys, xs, 1)
-    return {'a': float(a), 'b': float(b),
-            'ymin': float(ys.min()), 'ymax': float(ys.max())}
-
-
-def fit_sideline_undistorted(pixels: np.ndarray, intr: CameraIntrinsics):
-    pts_u = undistort_points(pixels.astype(np.float64), intr)
-    xs, ys = pts_u[:, 0], pts_u[:, 1]
-    b, a = np.polyfit(xs, ys, 1)        # y = a + b·x
-    return {'a': float(a), 'b': float(b),
-            'xmin': float(xs.min()), 'xmax': float(xs.max())}
-
-
 def detect_hash_rows(hash_mask: np.ndarray, intr: CameraIntrinsics,
                      min_pixels: int = 30):
     """Returns list of (m, c) — up to 2 lines from sequential RANSAC."""
@@ -714,7 +698,7 @@ def main():
     valid_until = lost_from if lost_from is not None else n_done
     if lost_from is not None:
         print(f"  clip LOST from frame {lost_from} "
-              f"({n_done - lost_from} frames; \u22653 consecutive carries)")
+              f"({n_done - lost_from} frames; ≥3 consecutive carries)")
 
     # Smooth H matrices over the valid range (Savitzky-Golay).
     for mm in frame_meta:
@@ -723,7 +707,6 @@ def main():
                       if mm["H_raw"] is not None), None)
     if first_ok is not None and first_ok < valid_until:
         Hs_in = [frame_meta[i]["H_raw"] for i in range(first_ok, valid_until)]
-        from rebuild_step8_homography import smooth_hs
         Hs_out = smooth_hs(Hs_in, window=7, poly=2)
         for k_off, hs in enumerate(Hs_out):
             frame_meta[first_ok + k_off]["H"] = hs

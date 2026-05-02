@@ -20,15 +20,14 @@ from scipy.optimize import minimize_scalar
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts/testing"))
 
 from src.homography.grid_solver_v2 import (
     group_yardline_pixels_cc, group_sideline_pixels,
 )
 from src.homography.distortion import CameraIntrinsics, undistort_points
 
-from rebuild_step4_hashes_v2 import total_mse, ransac_line
-from rectify_step2_per_frame import run_specialists, LINE_WEIGHTS, HASH_WEIGHTS
+from src.homography.line_fit import total_mse, ransac_line
+from src.homography.rectify import run_specialists, LINE_WEIGHTS, HASH_WEIGHTS
 
 
 def main():

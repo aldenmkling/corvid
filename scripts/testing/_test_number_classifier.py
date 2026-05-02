@@ -19,18 +19,19 @@ from scipy.optimize import minimize_scalar
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts/testing"))
 
 from src.homography import painted_numbers
 from src.homography.distortion import CameraIntrinsics
 from src.homography.grid_solver_v2 import group_yardline_pixels_cc
-from rebuild_full_clip_viz import (
+from src.homography.yardline_tracker import (
     YardlineTracker, group_sideline_pixels_cc as group_sideline_pixels,
 )
-from rebuild_step4_hashes_v2 import total_mse
-from rectify_step2_per_frame import (
+from src.homography.line_fit import (
+    total_mse, fit_yardline_undistorted, fit_sideline_undistorted,
+)
+from src.homography.rectify import (
     run_specialists, LINE_WEIGHTS, HASH_WEIGHTS, NUMBER_WEIGHTS,
-    fit_yardline_undistorted, fit_sideline_undistorted, detect_hash_rows,
+    detect_hash_rows,
     HashRowTracker, NGS_X_LEFT_GOAL, NGS_X_RIGHT_GOAL, YD_PER_GRID,
 )
 
