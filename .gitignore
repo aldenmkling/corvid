@@ -48,6 +48,10 @@ data/line_detection/
 data/line_detection_build.log
 # Hash-only keypoint split (regeneratable from data/field_keypoints)
 data/field_keypoints_hash_only/
+# Hash mask round 3 (regeneratable from data/field_keypoints + line UNet)
+data/hash_masks/
+# Painted-number classifier crops (auto-mined from rectify pipeline)
+data/number_classifier/
 
 # Output (generated images, tracking results)
 output/
