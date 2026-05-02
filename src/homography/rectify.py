@@ -626,41 +626,85 @@ def discover_g0(cap, n_total, intr, undist_map_x, undist_map_y,
     return summary
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--clip", default=os.path.join(
-        PROJECT_ROOT, "videos/clips/2019102712/play_046/sideline.mp4"))
-    ap.add_argument("--g0-ngs-x", type=float, default=None,
-                     help="leftmost yardline NGS x. If omitted, auto-detect "
-                          "via the painted-number classifier (pre-scan).")
-    ap.add_argument("--classifier-weights", default=os.path.join(
-        PROJECT_ROOT, "models/number_classifier_best.pth"))
-    ap.add_argument("--out", default=os.path.join(
-        PROJECT_ROOT, "output/rebuild/rectify_step2_overlay.mp4"))
-    ap.add_argument("--device", default="mps")
-    ap.add_argument("--max-frames", type=int, default=None)
-    args = ap.parse_args()
+def compute_homographies(
+    video_path: str,
+    classifier_weights: str = None,
+    device: str = "mps",
+    max_frames: int | None = None,
+    manual_g0: float | None = None,
+    verbose: bool = True,
+    return_frame_meta: bool = False,
+    _phase_t: dict | None = None,
+    _t_overall_start: float | None = None,
+) -> dict:
+    """Run pass-1 of the rectify pipeline (per-frame H + metadata).
 
-    cap = cv2.VideoCapture(args.clip)
+    Args:
+        video_path: path to the sideline mp4.
+        classifier_weights: painted-number classifier weights (defaults to
+            project's models/number_classifier_best.pth).
+        device: torch device for the UNets / classifier.
+        max_frames: cap the number of frames processed.
+        manual_g0: if not None, skip the prescan and use this NGS-x for the
+            leftmost yardline (g=0).
+        verbose: print pass-1 progress messages.
+        return_frame_meta: if True, the returned dict includes 'frame_meta'
+            (list of per-frame dicts with H_raw, corrs, masks, etc.) so
+            pass-2 can re-render. Set False to free memory.
+        _phase_t: optional defaultdict(float) — caller can pass in to share
+            timing accumulators with downstream passes (used by main()).
+        _t_overall_start: optional float — wall-clock start time, shared
+            with caller for an end-to-end total.
+
+    Returns:
+        dict with keys:
+            'Hs': list of (3,3) np.ndarray or None — smoothed homography per
+                frame (image_undistorted -> NGS yards)
+            'K': (3,3) camera intrinsic matrix
+            'dist': (5,) distortion coefficients
+            'undist_map_x', 'undist_map_y': cached undistortion maps (or None)
+            'valid_until': int — first frame after which the clip is LOST
+            'lost_from': int | None — first frame of the LOST run
+            'g0_x': float — auto-detected or manual g0
+            'fps': float
+            'n_frames': int — total frames processed
+            'image_size': (w, h)
+            'quality_flag': dict with keys 'questionable', 'reasons',
+                'mean_ngs_x_range', 'mean_n_corrs', 'pct_low_x_spread'
+            'method_counts': dict counting full/delta/carry/none
+            'methods': list[str] of length n_done
+            'first_ok': int | None — first frame with raw H solution
+            'frame_meta': list[dict] (only if return_frame_meta=True)
+    """
+    if classifier_weights is None:
+        classifier_weights = os.path.join(
+            PROJECT_ROOT, "models/number_classifier_best.pth")
+
+    cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"  failed to open {args.clip}"); return
+        if verbose:
+            print(f"  failed to open {video_path}")
+        return None
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if args.max_frames:
-        n_frames = min(n_frames, args.max_frames)
+    if max_frames:
+        n_frames = min(n_frames, max_frames)
 
     ok, frame0 = cap.read()
     if not ok:
-        print(f"  empty clip"); return
+        if verbose:
+            print(f"  empty clip")
+        return None
     h, w = frame0.shape[:2]
     focal = float(max(h, w))
     cx, cy = w / 2.0, h / 2.0
-    print(f"  clip: {os.path.relpath(args.clip, PROJECT_ROOT)}  "
-          f"{w}x{h}  {n_frames} frames  fps={fps:.1f}")
+    if verbose:
+        print(f"  clip: {os.path.relpath(video_path, PROJECT_ROOT)}  "
+              f"{w}x{h}  {n_frames} frames  fps={fps:.1f}")
 
     # ── Bootstrap on frame 0 ────────────────────────────────────────────
     yard0, side0, hash0 = run_specialists(
-        frame0, LINE_WEIGHTS, HASH_WEIGHTS, args.device)
+        frame0, LINE_WEIGHTS, HASH_WEIGHTS, device)
     yl0 = group_yardline_pixels_cc(yard0)
     sl0 = group_sideline_pixels(side0)
     line_pts = [g.pixels for g in yl0] + [g.pixels for g in sl0]
@@ -676,7 +720,8 @@ def main():
     intr = CameraIntrinsics(fx=focal, fy=focal, cx=cx, cy=cy, k1=k1, k2=0.0)
     K = np.array([[focal, 0, cx], [0, focal, cy], [0, 0, 1]], dtype=np.float64)
     dist = np.array([k1, 0.0, 0, 0, 0], dtype=np.float64)
-    print(f"  bootstrap k1 = {k1:+.4f}")
+    if verbose:
+        print(f"  bootstrap k1 = {k1:+.4f}")
 
     # Cache the undistortion remap maps. k1 is fixed per clip, so the maps
     # are constant across all frames; cv2.remap with cached maps is much
@@ -688,30 +733,35 @@ def main():
         undist_map_x = undist_map_y = None
 
     # ── Resolve g0 (manual flag or classifier pre-scan) ─────────────────
-    if args.g0_ngs_x is not None:
-        g0_x = float(args.g0_ngs_x)
-        print(f"  g0 = {g0_x:.1f} (manual)")
+    if manual_g0 is not None:
+        g0_x = float(manual_g0)
+        if verbose:
+            print(f"  g0 = {g0_x:.1f} (manual)")
     else:
-        print(f"  g0 = auto (pre-scanning clip with number classifier)")
+        if verbose:
+            print(f"  g0 = auto (pre-scanning clip with number classifier)")
         s = discover_g0(cap, n_frames, intr, undist_map_x, undist_map_y,
                           LINE_WEIGHTS, HASH_WEIGHTS, NUMBER_WEIGHTS,
-                          args.classifier_weights, args.device, h, w)
+                          classifier_weights, device, h, w)
         if s["g0"] is None:
-            print(f"    [g0 prescan] no painted-number votes anywhere — "
-                  f"falling back to default g0={G0_NGS_X}")
+            if verbose:
+                print(f"    [g0 prescan] no painted-number votes anywhere — "
+                      f"falling back to default g0={G0_NGS_X}")
             g0_x = G0_NGS_X
         elif s["frozen"]:
-            print(f"    [g0 prescan] frozen at frame {s['frame']}  "
-                  f"g0={s['g0']:.1f}  score={s['score']:.2f}  "
-                  f"voted={s['n_voted']}/{s['n_seen']}  "
-                  f"({s['elapsed_s']:.1f}s)")
+            if verbose:
+                print(f"    [g0 prescan] frozen at frame {s['frame']}  "
+                      f"g0={s['g0']:.1f}  score={s['score']:.2f}  "
+                      f"voted={s['n_voted']}/{s['n_seen']}  "
+                      f"({s['elapsed_s']:.1f}s)")
             g0_x = float(s["g0"])
         else:
-            print(f"    [g0 prescan] WARN never froze — best-guess "
-                  f"g0={s['g0']:.1f}  score={s['score']:.2f}  "
-                  f"runner={s['runner_score']:.2f}  margin={s['margin']:.2f}×  "
-                  f"voted={s['n_voted']}/{s['n_seen']}  "
-                  f"({s['elapsed_s']:.1f}s)")
+            if verbose:
+                print(f"    [g0 prescan] WARN never froze — best-guess "
+                      f"g0={s['g0']:.1f}  score={s['score']:.2f}  "
+                      f"runner={s['runner_score']:.2f}  margin={s['margin']:.2f}×  "
+                      f"voted={s['n_voted']}/{s['n_seen']}  "
+                      f"({s['elapsed_s']:.1f}s)")
             g0_x = float(s["g0"])
     g_min = int((NGS_X_LEFT_GOAL - g0_x) / YD_PER_GRID)
     g_max = int((NGS_X_RIGHT_GOAL - g0_x) / YD_PER_GRID)
@@ -724,26 +774,30 @@ def main():
     method_counts = {"full": 0, "delta": 0, "carry": 0, "none": 0}
 
     # Per-phase timing accumulators
-    phase_t = defaultdict(float)
-    t_overall_start = time.time()
+    if _phase_t is None:
+        _phase_t = defaultdict(float)
+    phase_t = _phase_t
+    if _t_overall_start is None:
+        _t_overall_start = time.time()
 
     fits_yl0 = [fit_yardline_undistorted(g.pixels, intr) for g in yl0]
     yl_tracker.init_from(fits_yl0, cy)
 
     # ── PASS 1: compute everything per frame (no rendering) ────────────
-    print("  pass 1: computing per-frame H ...")
+    if verbose:
+        print("  pass 1: computing per-frame H ...")
     frame_meta = []
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     n_done = 0
 
     while True:
         ok, frame = cap.read()
-        if not ok or (args.max_frames and n_done >= args.max_frames):
+        if not ok or (max_frames and n_done >= max_frames):
             break
 
         t0 = time.time()
         yard, side, hash_ = run_specialists(
-            frame, LINE_WEIGHTS, HASH_WEIGHTS, args.device)
+            frame, LINE_WEIGHTS, HASH_WEIGHTS, device)
         phase_t['unet_line_hash'] += time.time() - t0
 
         t0 = time.time()
@@ -811,7 +865,7 @@ def main():
         # corrs[i]["pixel_u"] without further undistortion.
         t_num_unet = time.time()
         num_mask_d = painted_numbers.predict_mask(
-            frame, NUMBER_WEIGHTS, args.device)
+            frame, NUMBER_WEIGHTS, device)
         phase_t['unet_number'] += time.time() - t_num_unet
         t_num_proc = time.time()
         if undist_map_x is not None:
@@ -862,7 +916,7 @@ def main():
             "hash_state": rows.get("state", "?"),
         })
         n_done += 1
-        if n_done % 30 == 0:
+        if verbose and n_done % 30 == 0:
             print(f"  pass1 frame {n_done}/{n_frames}  "
                   f"full={method_counts.get('full', 0)}  "
                   f"delta={method_counts.get('delta', 0)}  "
@@ -873,7 +927,7 @@ def main():
     # ── Detect lost + smooth Hs ─────────────────────────────────────────
     lost_from = detect_lost(methods, min_sustained_loss=3)
     valid_until = lost_from if lost_from is not None else n_done
-    if lost_from is not None:
+    if verbose and lost_from is not None:
         print(f"  clip LOST from frame {lost_from} "
               f"({n_done - lost_from} frames; ≥3 consecutive carries)")
 
@@ -886,6 +940,13 @@ def main():
     # under-constrained clips because the H is overfitting a small corr
     # set. The reliable signals are spatial: how spread out the corrs are
     # in field-x and how many of them there are.
+    quality_flag = {
+        "questionable": False,
+        "reasons": [],
+        "mean_ngs_x_range": 0.0,
+        "mean_n_corrs": 0.0,
+        "pct_low_x_spread": 0.0,
+    }
     if valid_until > 0:
         ngs_x_ranges = []
         n_corrs_per_frame = []
@@ -910,15 +971,23 @@ def main():
         if pct_low_xr > 30:
             reasons.append(f"{pct_low_xr:.0f}% frames have x_spread<10yd")
         questionable = bool(reasons)
-        if questionable:
-            print(f"  WARN rectification QUESTIONABLE — {'; '.join(reasons)}")
-            print(f"       (under-constrained: corrs spatially concentrated, "
-                  f"H wavers in unconstrained regions)")
-        else:
-            print(f"  rectification quality OK — "
-                  f"mean ngs_x_range={mean_xr:.1f}yd, "
-                  f"mean n_corrs={mean_nc:.1f}, "
-                  f"low-spread frames={pct_low_xr:.0f}%")
+        quality_flag = {
+            "questionable": questionable,
+            "reasons": reasons,
+            "mean_ngs_x_range": mean_xr,
+            "mean_n_corrs": mean_nc,
+            "pct_low_x_spread": pct_low_xr,
+        }
+        if verbose:
+            if questionable:
+                print(f"  WARN rectification QUESTIONABLE — {'; '.join(reasons)}")
+                print(f"       (under-constrained: corrs spatially concentrated, "
+                      f"H wavers in unconstrained regions)")
+            else:
+                print(f"  rectification quality OK — "
+                      f"mean ngs_x_range={mean_xr:.1f}yd, "
+                      f"mean n_corrs={mean_nc:.1f}, "
+                      f"low-spread frames={pct_low_xr:.0f}%")
 
     # Smooth H matrices over the valid range (Savitzky-Golay).
     for mm in frame_meta:
@@ -930,8 +999,87 @@ def main():
         Hs_out = smooth_hs(Hs_in, window=7, poly=2)
         for k_off, hs in enumerate(Hs_out):
             frame_meta[first_ok + k_off]["H"] = hs
-        print(f"  smoothed Hs over frames {first_ok}-{valid_until-1} "
-              f"(SG window=7, poly=2)")
+        if verbose:
+            print(f"  smoothed Hs over frames {first_ok}-{valid_until-1} "
+                  f"(SG window=7, poly=2)")
+
+    # Build the per-frame Hs list. Frames beyond valid_until -> None.
+    Hs = []
+    for fi, mm in enumerate(frame_meta):
+        if fi < valid_until:
+            Hs.append(mm["H"])
+        else:
+            Hs.append(None)
+
+    out = {
+        "Hs": Hs,
+        "K": K,
+        "dist": dist,
+        "undist_map_x": undist_map_x,
+        "undist_map_y": undist_map_y,
+        "valid_until": valid_until,
+        "lost_from": lost_from,
+        "g0_x": g0_x,
+        "fps": fps,
+        "n_frames": n_done,
+        "image_size": (w, h),
+        "quality_flag": quality_flag,
+        "method_counts": method_counts,
+        "methods": methods,
+        "first_ok": first_ok,
+    }
+    if return_frame_meta:
+        out["frame_meta"] = frame_meta
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--clip", default=os.path.join(
+        PROJECT_ROOT, "videos/clips/2019102712/play_046/sideline.mp4"))
+    ap.add_argument("--g0-ngs-x", type=float, default=None,
+                     help="leftmost yardline NGS x. If omitted, auto-detect "
+                          "via the painted-number classifier (pre-scan).")
+    ap.add_argument("--classifier-weights", default=os.path.join(
+        PROJECT_ROOT, "models/number_classifier_best.pth"))
+    ap.add_argument("--out", default=os.path.join(
+        PROJECT_ROOT, "output/rebuild/rectify_step2_overlay.mp4"))
+    ap.add_argument("--device", default="mps")
+    ap.add_argument("--max-frames", type=int, default=None)
+    args = ap.parse_args()
+
+    # Per-phase timing accumulators (shared with compute_homographies so we
+    # can report a unified pass1 + pass2 + other breakdown at the end).
+    phase_t = defaultdict(float)
+    t_overall_start = time.time()
+
+    result = compute_homographies(
+        video_path=args.clip,
+        classifier_weights=args.classifier_weights,
+        device=args.device,
+        max_frames=args.max_frames,
+        manual_g0=args.g0_ngs_x,
+        verbose=True,
+        return_frame_meta=True,
+        _phase_t=phase_t,
+        _t_overall_start=t_overall_start,
+    )
+    if result is None:
+        return
+
+    frame_meta = result["frame_meta"]
+    Hs = result["Hs"]
+    K = result["K"]
+    dist = result["dist"]
+    undist_map_x = result["undist_map_x"]
+    undist_map_y = result["undist_map_y"]
+    valid_until = result["valid_until"]
+    lost_from = result["lost_from"]
+    g0_x = result["g0_x"]
+    fps = result["fps"]
+    n_done = result["n_frames"]
+    w, h = result["image_size"]
+    method_counts = result["method_counts"]
 
     # ── PASS 2: render with smoothed Hs ─────────────────────────────────
     print("  pass 2: rendering ...")
@@ -1083,6 +1231,154 @@ def main():
     print(f"    {'pass2_write':24s} {phase_t['pass2_write']:6.1f}s")
     other = total_wall - p1_total - p2_total
     print(f"  OTHER (bootstrap + smooth + io): {other:.1f}s")
+
+
+# ── Per-clip homography cache ──────────────────────────────────────────────
+import json as _hcache_json   # avoid shadowing if json is patched at module level
+
+DEFAULT_HOMOGRAPHY_CACHE_DIR = "output/homography_cache"
+
+
+def homography_cache_path(clip_path: str,
+                            cache_dir: str = DEFAULT_HOMOGRAPHY_CACHE_DIR) -> str:
+    """Cache file for a clip's homography pipeline output."""
+    norm = os.path.abspath(clip_path)
+    parts = norm.split(os.sep)
+    if "clips" in parts:
+        idx = parts.index("clips")
+        tag_parts = parts[idx + 1:]
+    else:
+        tag_parts = [os.path.splitext(os.path.basename(clip_path))[0]]
+    tag = "_".join(p.replace(".mp4", "") for p in tag_parts)
+    return os.path.join(cache_dir, f"{tag}.npz")
+
+
+def save_homography_cache(cache_path: str, result: dict, metadata: dict):
+    """Save compute_homographies() output to a single .npz.
+
+    Stores Hs as (n_frames, 3, 3) float64 with NaN-filled rows for None
+    entries. Skips undistort maps (regenerated on load from K+dist) and
+    skips frame_meta (only needed by main()'s pass-2 rendering)."""
+    Hs = result["Hs"]
+    n = len(Hs)
+    Hs_arr = np.full((n, 3, 3), np.nan, dtype=np.float64)
+    for i, H in enumerate(Hs):
+        if H is not None:
+            Hs_arr[i] = np.asarray(H, dtype=np.float64)
+    K = (np.asarray(result["K"], dtype=np.float64)
+         if result["K"] is not None else np.full((3, 3), np.nan))
+    dist = (np.asarray(result["dist"], dtype=np.float64)
+            if result["dist"] is not None else np.full(5, np.nan))
+    meta_payload = {
+        **metadata,
+        "valid_until": int(result["valid_until"]),
+        "lost_from": (None if result["lost_from"] is None
+                      else int(result["lost_from"])),
+        "g0_x": float(result["g0_x"]),
+        "fps": float(result["fps"]),
+        "n_frames": int(result["n_frames"]),
+        "image_size": list(result["image_size"]),
+        "first_ok": (None if result.get("first_ok") is None
+                      else int(result["first_ok"])),
+        "method_counts": {k: int(v) for k, v in result["method_counts"].items()},
+        "methods": list(result["methods"]),
+        "quality_flag": result["quality_flag"],
+    }
+    os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
+    np.savez(cache_path, Hs=Hs_arr, K=K, dist=dist,
+              meta=np.array(_hcache_json.dumps(meta_payload)))
+
+
+def load_homography_cache(cache_path: str) -> dict:
+    """Inverse of save_homography_cache. Returns the same dict shape
+    `compute_homographies()` produces (minus `frame_meta`); regenerates
+    undistort maps from K+dist+image_size."""
+    data = np.load(cache_path, allow_pickle=False)
+    Hs_arr = data["Hs"]
+    Hs = []
+    for i in range(Hs_arr.shape[0]):
+        H = Hs_arr[i]
+        Hs.append(None if np.isnan(H).any() else H.copy())
+    K = data["K"].copy()
+    if np.isnan(K).any():
+        K = None
+    dist = data["dist"].copy()
+    if np.isnan(dist).any():
+        dist = None
+    meta = _hcache_json.loads(str(data["meta"]))
+    w, h = (int(meta["image_size"][0]), int(meta["image_size"][1]))
+    if K is not None and dist is not None and abs(float(dist[0])) > 1e-6:
+        ux, uy = cv2.initUndistortRectifyMap(
+            K, dist, None, K, (w, h), cv2.CV_32FC1)
+    else:
+        ux = uy = None
+    return {
+        "Hs": Hs,
+        "K": K,
+        "dist": dist,
+        "undist_map_x": ux,
+        "undist_map_y": uy,
+        "valid_until": meta["valid_until"],
+        "lost_from": meta["lost_from"],
+        "g0_x": float(meta["g0_x"]),
+        "fps": float(meta["fps"]),
+        "n_frames": int(meta["n_frames"]),
+        "image_size": tuple(meta["image_size"]),
+        "first_ok": meta.get("first_ok"),
+        "method_counts": meta.get("method_counts", {}),
+        "methods": meta.get("methods", []),
+        "quality_flag": meta.get("quality_flag", {}),
+    }
+
+
+def get_or_build_homography_cache(clip_path: str,
+                                     classifier_weights: str = None,
+                                     device: str = "mps",
+                                     manual_g0: float = None,
+                                     cache_dir: str = DEFAULT_HOMOGRAPHY_CACHE_DIR,
+                                     force_rebuild: bool = False,
+                                     verbose: bool = True) -> dict:
+    """Return rectify pass-1 result for a clip. Build + cache on first call,
+    load from cache on subsequent calls. Cache invalidates on manual_g0
+    mismatch."""
+    cache_path = homography_cache_path(clip_path, cache_dir=cache_dir)
+    if os.path.exists(cache_path) and not force_rebuild:
+        try:
+            r = load_homography_cache(cache_path)
+        except Exception as e:
+            if verbose:
+                print(f"  homography cache at {cache_path} corrupt ({e}); "
+                      f"rebuilding")
+        else:
+            cached_g0 = r["g0_x"]
+            if manual_g0 is None or abs(cached_g0 - float(manual_g0)) < 1e-6:
+                if verbose:
+                    print(f"  loaded homography cache "
+                          f"(g0={cached_g0:.1f}, valid_until="
+                          f"{r['valid_until']}/{r['n_frames']}) "
+                          f"from {os.path.basename(cache_path)}")
+                return r
+            elif verbose:
+                print(f"  homography cache has g0={cached_g0:.1f} but "
+                      f"manual_g0={manual_g0}; rebuilding")
+    if verbose:
+        print(f"  building homography cache for {os.path.basename(clip_path)} ...")
+    r = compute_homographies(
+        clip_path, classifier_weights=classifier_weights, device=device,
+        manual_g0=manual_g0, verbose=verbose, return_frame_meta=False)
+    metadata = {
+        "clip_path": (os.path.relpath(clip_path) if not os.path.isabs(clip_path)
+                       else clip_path),
+        "manual_g0": (None if manual_g0 is None else float(manual_g0)),
+        "device": device,
+        "classifier_weights": (None if classifier_weights is None
+                                  else os.path.basename(classifier_weights)),
+        "build_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_homography_cache(cache_path, r, metadata)
+    if verbose:
+        print(f"  saved homography cache -> {cache_path}")
+    return r
 
 
 if __name__ == "__main__":
