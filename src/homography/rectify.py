@@ -192,6 +192,69 @@ def render_rectified_frame(frame_u, H):
     return canvas
 
 
+def render_review_rectified(frame_bgr, H, K, dist):
+    """Build a rectified canvas with FULL annotations for review:
+      - Yardlines every 5 yd (green) with NGS_x text labels
+      - Sidelines (yellow)
+      - Hash rows: HASH_Y_NEAR + HASH_Y_FAR (red / blue)
+      - Number top + bottom edges: NUMBER_Y ± 1 yd, both near and far (cyan)
+
+    Inputs:
+      frame_bgr — raw BGR frame from the source video (will be undistorted here)
+      H         — homography (undistorted-image → NGS yards)
+      K, dist   — camera intrinsics + distortion (used to undistort the frame)
+
+    Output: BGR canvas at (RECT_H, RECT_W) with NGS y=0 at bottom (broadcast
+    orientation).
+    """
+    from src.homography.field_model import NUMBER_Y_NEAR, NUMBER_Y_FAR
+    h, w = frame_bgr.shape[:2]
+    if K is not None and dist is not None and abs(float(dist[0])) > 1e-6:
+        ux, uy = cv2.initUndistortRectifyMap(
+            K, dist, None, K, (w, h), cv2.CV_32FC1)
+        frame_u = cv2.remap(frame_bgr, ux, uy, cv2.INTER_LINEAR)
+    else:
+        frame_u = frame_bgr
+    canvas = render_rectified_frame(frame_u, H)
+    if H is None:
+        return canvas
+    # Number-edge horizontal lines: top + bottom of near and far number bands
+    # (cyan). NUMBER_Y_* is the digit center; ±1 yd is top/bottom edge.
+    NUMBER_EDGE_COLOR = (200, 220, 60)   # cyan-ish (BGR)
+    flipped_y_px_h = RECT_H  # for flip calc below: image_y = RECT_H - 1 - field_y_px
+    for y_yd in [NUMBER_Y_NEAR - 1.0, NUMBER_Y_NEAR + 1.0,
+                  NUMBER_Y_FAR - 1.0, NUMBER_Y_FAR + 1.0]:
+        # Canvas was flipped vertically, so we draw at flipped y
+        y_px = int(y_yd * PX_PER_YARD)
+        y_px_flipped = RECT_H - 1 - y_px
+        cv2.line(canvas, (0, y_px_flipped), (RECT_W - 1, y_px_flipped),
+                 NUMBER_EDGE_COLOR, 1, cv2.LINE_AA)
+    # Yardline numeric labels (e.g., "10", "20", ..., "50", "40", ..., "10")
+    # Stand on the bottom of the canvas so they don't occlude the field.
+    LABEL_COLOR = (255, 255, 255)
+    LABEL_BG = (0, 0, 0)
+    for x_yd in range(int(NGS_X_LEFT_GOAL), int(NGS_X_RIGHT_GOAL) + 1, 5):
+        x_px = int((x_yd - DISPLAY_X_LEFT) * PX_PER_YARD)
+        # NFL convention: 50 in the middle, decreasing both ways
+        label_val = (50 - abs(x_yd - 60))
+        # Goal lines: 0 (== "G"); endzone-back: not labeled here
+        text = f"{int(label_val)}" if label_val >= 0 else "G"
+        if x_yd in (NGS_X_LEFT_GOAL, NGS_X_RIGHT_GOAL):
+            text = "G"
+        # Top label
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        tx = max(0, x_px - tw // 2)
+        cv2.rectangle(canvas, (tx - 2, 2), (tx + tw + 2, 4 + th + 2), LABEL_BG, -1)
+        cv2.putText(canvas, text, (tx, 2 + th + 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, LABEL_COLOR, 1, cv2.LINE_AA)
+        # Bottom label
+        cv2.rectangle(canvas, (tx - 2, RECT_H - th - 6),
+                      (tx + tw + 2, RECT_H - 2), LABEL_BG, -1)
+        cv2.putText(canvas, text, (tx, RECT_H - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, LABEL_COLOR, 1, cv2.LINE_AA)
+    return canvas
+
+
 def stack_frames(top, bot):
     """Resize bot to top's width, stack vertically. Returns combined."""
     if bot.shape[1] != top.shape[1]:
@@ -624,6 +687,203 @@ def discover_g0(cap, n_total, intr, undist_map_x, undist_map_y,
     summary = estimator.summary()
     summary["elapsed_s"] = time.time() - t0
     return summary
+
+
+def compute_homography_at_sampled_frames(
+    video_path: str,
+    sample_stride: int = 30,
+    tracking_stride: int = 3,
+    classifier_weights: str = None,
+    device: str = "mps",
+    manual_g0: float | None = None,
+    verbose: bool = False,
+) -> dict | None:
+    """Solve H at sampled frames, with dense yardline tracking in between
+    so g_index identity is correctly carried across the clip.
+
+    Per clip:
+      - Bootstrap k1 (frame 0)
+      - g0 prescan (one-time)
+      - Init persistent YardlineTracker, HashRowTracker, NumberSideTracker
+
+    Per frame at `tracking_stride` (default 3 = 10Hz @ 30fps):
+      - Read frame, run line UNet (yard + side channels)
+      - Fit yardlines + sidelines, call yl_tracker.update() to maintain
+        g_index identity across the clip
+
+    Per frame at `sample_stride` (default 30 = 1Hz):
+      - Above PLUS:
+      - Run hash + number UNets, build corrs (using tracked g_index)
+      - RANSAC → H
+
+    No bank, no smoothing, no carry/delta. Faster than full pass-1 while
+    preserving cross-frame yardline identity that the naive sampled-only
+    approach broke.
+
+    Returns same dict layout as before, or None if bootstrap fails.
+    """
+    from src.homography.h_tracker import solve_h
+    if classifier_weights is None:
+        classifier_weights = os.path.join(
+            PROJECT_ROOT, "models/number_classifier_best.pth")
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        if verbose: print(f"  failed to open {video_path}")
+        return None
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    ok, frame0 = cap.read()
+    if not ok:
+        return None
+    h, w = frame0.shape[:2]
+    focal = float(max(h, w))
+    cx, cy = w / 2.0, h / 2.0
+
+    # Bootstrap k1 from frame 0
+    yard0, side0, _ = run_specialists(frame0, LINE_WEIGHTS, HASH_WEIGHTS, device)
+    yl0 = group_yardline_pixels_cc(yard0)
+    sl0 = group_sideline_pixels(side0)
+    line_pts = [g.pixels for g in yl0] + [g.pixels for g in sl0]
+    line_kinds = ["yardline"] * len(yl0) + ["sideline"] * len(sl0)
+    if not line_pts:
+        return None
+    line_pts_sub = [p[::max(1, len(p) // 50)] for p in line_pts]
+    res = minimize_scalar(
+        lambda k1: total_mse(line_pts_sub, line_kinds,
+                              CameraIntrinsics(fx=focal, fy=focal, cx=cx, cy=cy,
+                                                k1=float(k1), k2=0.0)),
+        bounds=(-0.5, 0.5), method="bounded", options={"xatol": 1e-4})
+    k1 = float(res.x)
+    intr = CameraIntrinsics(fx=focal, fy=focal, cx=cx, cy=cy, k1=k1, k2=0.0)
+    K = np.array([[focal, 0, cx], [0, focal, cy], [0, 0, 1]], dtype=np.float64)
+    dist = np.array([k1, 0, 0, 0, 0], dtype=np.float64)
+    if abs(k1) > 1e-6:
+        umx, umy = cv2.initUndistortRectifyMap(
+            K, dist, None, K, (w, h), cv2.CV_32FC1)
+    else:
+        umx = umy = None
+
+    # g0 prescan
+    if manual_g0 is not None:
+        g0_x = float(manual_g0)
+    else:
+        s = discover_g0(cap, n_frames, intr, umx, umy,
+                        LINE_WEIGHTS, HASH_WEIGHTS, NUMBER_WEIGHTS,
+                        classifier_weights, device, h, w)
+        g0_x = float(s["g0"]) if s["g0"] is not None else G0_NGS_X
+
+    # Persistent trackers (init lazily on first frame that produces fits)
+    g_min = int((NGS_X_LEFT_GOAL - g0_x) / YD_PER_GRID)
+    g_max = int((NGS_X_RIGHT_GOAL - g0_x) / YD_PER_GRID)
+    yl_tracker = YardlineTracker(g_min=g_min, g_max=g_max, frame_h=h)
+    hash_tracker = HashRowTracker(image_w=w)
+    num_tracker = painted_numbers.NumberSideTracker()
+    yl_initialized = False
+
+    samples = []
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    fi = -1
+    while True:
+        fi += 1
+        if fi >= n_frames:
+            break
+        ok, frame = cap.read()
+        if not ok:
+            break
+        is_tracking = (fi % tracking_stride == 0)
+        is_sample = (fi % sample_stride == 0)
+        if not (is_tracking or is_sample):
+            continue
+
+        # ── Yardline tracking (dense) ───────────────────────────────────
+        yard, side, hash_ = run_specialists(
+            frame, LINE_WEIGHTS, HASH_WEIGHTS, device)
+        yl = group_yardline_pixels_cc(yard)
+        sl = group_sideline_pixels(side)
+        fits_yl = [fit_yardline_undistorted(g.pixels, intr) for g in yl]
+        fits_sl = [fit_sideline_undistorted(g.pixels, intr) for g in sl]
+        if not yl_initialized:
+            init = yl_tracker.init_from(fits_yl, cy)
+            if init is None:
+                continue
+            fits_kept, g_index, _ = init
+            yl_initialized = True
+        else:
+            fits_kept, g_index, _, _ = yl_tracker.update(fits_yl, cy)
+
+        if not is_sample:
+            continue
+        if len(fits_kept) < 2:
+            continue
+
+        # ── Sample-frame: hash + number + corrs + H ─────────────────────
+        rows, hash_corrs = compute_hash_data(
+            hash_, fits_kept, g_index, g0_x, intr,
+            hash_tracker.far, hash_tracker.near, w, h,
+            g0_lo=NGS_X_LEFT_GOAL, g0_hi=NGS_X_RIGHT_GOAL,
+            yd_per_grid=YD_PER_GRID)
+        if rows['far'] is not None: hash_tracker.far = rows['far']
+        if rows['near'] is not None: hash_tracker.near = rows['near']
+
+        corrs = list(hash_corrs)
+        for sf in fits_sl:
+            for i, fit in enumerate(fits_kept):
+                g = int(g_index[i])
+                x_ngs = g0_x + YD_PER_GRID * g
+                if not (NGS_X_LEFT_GOAL <= x_ngs <= NGS_X_RIGHT_GOAL):
+                    continue
+                pt = line_intersect_yardline_sideline(fit, sf)
+                if pt is None: continue
+                px, py = pt
+                if not (0 <= px < w and 0 <= py < h): continue
+                y_at_center = sideline_y_at_x(sf, w / 2)
+                y_field = 0.0 if y_at_center > h / 2 else FIELD_WIDTH
+                sl_label = "near" if y_field == 0.0 else "far"
+                corrs.append({
+                    "pixel_u": np.array([px, py], dtype=np.float64),
+                    "field": np.array([x_ngs, y_field], dtype=np.float64),
+                    "kind": f"sideline_{sl_label}",
+                })
+
+        num_mask_d = painted_numbers.predict_mask(frame, NUMBER_WEIGHTS, device)
+        num_mask_u = (cv2.remap(num_mask_d, umx, umy, cv2.INTER_NEAREST)
+                      if umx is not None else num_mask_d)
+        num_kps, _ = painted_numbers.process_frame(
+            num_mask_u, fits_kept, rows, fits_sl, g_index, h, w, num_tracker)
+        for kp in num_kps:
+            yl_idx = kp["yardline_idx"]
+            if yl_idx < 0 or yl_idx >= len(g_index): continue
+            g = int(g_index[yl_idx])
+            x_ngs = g0_x + YD_PER_GRID * g
+            if not (NGS_X_LEFT_GOAL <= x_ngs <= NGS_X_RIGHT_GOAL):
+                continue
+            corrs.append({
+                "pixel_u": np.array(kp["image_xy"], dtype=np.float64),
+                "field": np.array([x_ngs, kp["ngs_y"]], dtype=np.float64),
+                "kind": f"number_{kp['side']}",
+            })
+
+        H, inl, _ = solve_h(corrs)
+        if H is None:
+            continue
+        n_inliers = int(inl.sum()) if inl is not None else 0
+        n_corrs = len(corrs)
+        inlier_frac = n_inliers / max(1, n_corrs)
+        xs = [float(c["field"][0]) for c in corrs]
+        samples.append({
+            "frame_idx": int(fi),
+            "H": H,
+            "n_corrs": n_corrs,
+            "n_inliers": n_inliers,
+            "inlier_frac": inlier_frac,
+            "mean_ngs_x": float(np.mean(xs)),
+            "ngs_x_range": float(max(xs) - min(xs)) if xs else 0.0,
+        })
+    cap.release()
+    return {
+        "g0_x": g0_x, "k1": k1, "fps": fps, "n_frames": n_frames,
+        "image_size": (w, h), "K": K, "dist": dist, "samples": samples,
+    }
 
 
 def compute_homographies(

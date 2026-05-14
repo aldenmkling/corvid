@@ -1,0 +1,4 @@
+timm
+segmentation-models-pytorch
+opencv-python
+scipy

@@ -297,6 +297,120 @@ class KeypointTrackBank:
             "mean_residual_yd": mean_res,
         }
 
+    # ── Per-corr prefilter ──
+
+    def prefilter_corrs(
+        self,
+        correspondences: list[dict],
+        frame_idx: int,
+        same_track_pixel_tol_px: float = 50.0,
+        cross_track_pixel_tol_px: float = 20.0,
+        probation_min_obs: int = 3,
+        bootstrap_frames: int = 5,
+    ) -> tuple[list[dict], list[dict], dict]:
+        """Filter correspondences against the bank's track history.
+
+        Returns three groups: (kept, probationary, diagnostics).
+
+          - **kept**: corr passes all checks → caller should pass to RANSAC.
+          - **probationary**: corr is a fresh identity (no track yet, OR
+            track too young to trust) AND has no cross-track conflict →
+            caller should observe in the bank but NOT use in this frame's
+            H solve. After the corr appears `probation_min_obs` times it
+            gets promoted and joins `kept`.
+          - rejected (returned in neither group, only counted in
+            diagnostics): same-track inconsistency OR cross-track conflict.
+
+        Three checks per corr:
+
+          1. **Cross-track conflict** (rejected): corr's pixel is within
+             `cross_track_pixel_tol_px` of a DIFFERENT trusted track's
+             last pixel — its pixel position is "owned" by another
+             (kind, slot) identity. Catches identity flips (near→far hash,
+             wrong-side number, etc.).
+
+          2. **Same-track inconsistency** (rejected): corr's claimed
+             identity has a trusted track but the corr's pixel is more
+             than `same_track_pixel_tol_px` from that track's last pixel.
+             Catches a UNet detection drifting to a wrong row.
+
+          3. **Probation** (probationary): corr's claimed identity is
+             brand-new (no track) OR has a young track with fewer than
+             `probation_min_obs` observations. Bootstrap exemption:
+             tracks first observed during the clip's first
+             `bootstrap_frames` frames are exempt — they're treated as
+             established (otherwise the entire pipeline can't start).
+        """
+        diag = {
+            "n_input": len(correspondences),
+            "n_kept": 0,
+            "n_probationary": 0,
+            "n_dropped_self": 0,
+            "n_dropped_cross": 0,
+        }
+        if not correspondences:
+            return [], [], diag
+
+        trusted_pixels = [
+            (key, t.last_pixel_u)
+            for key, t in self.tracks.items()
+            if t.n_observations >= self.min_obs_for_trust
+        ]
+
+        kept = []
+        probationary = []
+
+        for c in correspondences:
+            pixel_u = np.asarray(c["pixel_u"], dtype=np.float64)
+            field_xy = np.asarray(c["field"], dtype=np.float64)
+            kind = c.get("kind") or kind_from_field(
+                field_xy, c.get("channel", 1)
+            )
+            slot_idx, _, _ = snap_to_yard_slot(field_xy[0])
+            my_key = (kind, slot_idx)
+            my_track = self.tracks.get(my_key)
+
+            # Check 1: cross-track conflict (terminal reject)
+            cross_conflict = False
+            for other_key, other_pixel in trusted_pixels:
+                if other_key == my_key:
+                    continue
+                d = float(np.linalg.norm(pixel_u - other_pixel))
+                if d < cross_track_pixel_tol_px:
+                    cross_conflict = True
+                    break
+            if cross_conflict:
+                diag["n_dropped_cross"] += 1
+                continue
+
+            # Check 2: same-track pixel inconsistency (terminal reject)
+            if (my_track is not None
+                    and my_track.n_observations >= self.min_obs_for_trust):
+                d = float(np.linalg.norm(pixel_u - my_track.last_pixel_u))
+                if d > same_track_pixel_tol_px:
+                    diag["n_dropped_self"] += 1
+                    continue
+
+            # Check 3: probation — brand-new or young identity
+            # Bootstrap exemption: tracks born during the first
+            # `bootstrap_frames` frames are treated as established (the
+            # pipeline can't start otherwise). After the bootstrap window,
+            # new tracks need probation_min_obs observations to graduate.
+            in_bootstrap = frame_idx < bootstrap_frames
+            born_in_bootstrap = (my_track is not None
+                                  and my_track.first_seen < bootstrap_frames)
+            exempt = in_bootstrap or born_in_bootstrap
+            if not exempt:
+                if my_track is None or my_track.n_observations < probation_min_obs:
+                    probationary.append(c)
+                    diag["n_probationary"] += 1
+                    continue
+
+            kept.append(c)
+            diag["n_kept"] += 1
+
+        return kept, probationary, diag
+
     # ── Coasting ──
 
     def coast_unobserved(

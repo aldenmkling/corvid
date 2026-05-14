@@ -164,13 +164,27 @@ def create_pod(args):
 
     cloud_type = getattr(args, 'cloud_type', 'ALL')
     retries = getattr(args, 'create_retries', 3)
+    min_upload = getattr(args, 'min_upload', None)
+    min_download = getattr(args, 'min_download', None)
+    country_code = getattr(args, 'country_code', None)
+    data_center_id = getattr(args, 'data_center_id', None)
 
     print(f"Creating RunPod pod...")
     print(f"  GPU: {args.gpu_type}")
     print(f"  GPU count: {args.gpu_count}")
     print(f"  Disk: {args.disk_size}GB")
     print(f"  Cloud type: {cloud_type}")
+    if min_upload is not None:   print(f"  Min upload:   {min_upload} Mbps")
+    if min_download is not None: print(f"  Min download: {min_download} Mbps")
+    if country_code:             print(f"  Country:      {country_code}")
+    if data_center_id:           print(f"  Data center:  {data_center_id}")
     print()
+
+    extra_kw = {}
+    if min_upload is not None:   extra_kw["min_upload"] = min_upload
+    if min_download is not None: extra_kw["min_download"] = min_download
+    if country_code:             extra_kw["country_code"] = country_code
+    if data_center_id:           extra_kw["data_center_id"] = data_center_id
 
     for attempt in range(1, retries + 1):
         pod = rp.create_pod(
@@ -183,6 +197,7 @@ def create_pod(args):
             ports="22/tcp",
             start_ssh=True,
             cloud_type=cloud_type,
+            **extra_kw,
         )
 
         pod_id = pod["id"]
@@ -781,6 +796,17 @@ def main():
                         help="GPU type (default: NVIDIA GeForce RTX 5090)")
     parser.add_argument("--gpu-count", type=int, default=1, help="Number of GPUs (default: 1)")
     parser.add_argument("--disk-size", type=int, default=50, help="Container disk size in GB (default: 50)")
+    parser.add_argument("--min-upload", type=int, default=None,
+                        help="Minimum upload bandwidth (Mbps) — filters out "
+                             "slow hosts at scheduling time. Try 100 to avoid "
+                             "the ~150 KB/s machines on the secure pool.")
+    parser.add_argument("--min-download", type=int, default=None,
+                        help="Minimum download bandwidth (Mbps).")
+    parser.add_argument("--country-code", default=None,
+                        help="ISO country code, e.g. 'US', 'CA'. Constrains "
+                             "pod location.")
+    parser.add_argument("--data-center-id", default=None,
+                        help="Specific RunPod datacenter id, e.g. 'US-OR-1'.")
 
     # Training config
     parser.add_argument("--training-type", default="rfdetr",

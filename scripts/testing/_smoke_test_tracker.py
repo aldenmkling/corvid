@@ -45,7 +45,6 @@ def main():
     homo = get_or_build_homography_cache(
         clip_path=CLIP,
         device="mps",
-        manual_g0=20.0,        # play_114 is a clean clip; skip the prescan
         verbose=True,
     )
     if homo is None:

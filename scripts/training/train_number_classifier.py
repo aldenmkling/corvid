@@ -74,7 +74,20 @@ PIXEL_STD = 0.224
 
 
 class NumberClassifierDataset(Dataset):
-    def __init__(self, root, classes=CLASSES, augment=False):
+    def __init__(self, root, classes=CLASSES, augment=False,
+                 input_size: int = INPUT_SIZE,
+                 input_w: int | None = None,
+                 input_h: int | None = None,
+                 morph_aug: bool = False,
+                 cutout_aug: bool = False):
+        # Support rectangular crops via explicit (input_w, input_h);
+        # default to square input_size when not provided.
+        if input_w is None:
+            input_w = input_size
+        if input_h is None:
+            input_h = input_size
+        self.input_w = input_w
+        self.input_h = input_h
         self.classes = classes
         self.cls_to_idx = {c: i for i, c in enumerate(classes)}
         self.samples = []
@@ -87,16 +100,28 @@ class NumberClassifierDataset(Dataset):
                     self.samples.append(
                         (os.path.join(cls_dir, fn), self.cls_to_idx[cls]))
         self.augment = augment and HAS_ALB
+        self.input_size = input_size
+        self.morph_aug = morph_aug
+        self.cutout_aug = cutout_aug
         if self.augment:
-            self.tf = A.Compose([
+            tf_list = [
                 A.Affine(rotate=(-5, 5), scale=(0.9, 1.1),
                           translate_px=(-2, 2),
                           interpolation=cv2.INTER_NEAREST,
                           p=0.8),
+            ]
+            if self.cutout_aug:
+                tf_list.append(A.CoarseDropout(
+                    num_holes_range=(1, 2),
+                    hole_height_range=(4, 10),
+                    hole_width_range=(4, 10),
+                    fill=0, p=0.5))
+            tf_list += [
                 A.Normalize(mean=(PIXEL_MEAN,), std=(PIXEL_STD,),
                               max_pixel_value=255.0),
                 ToTensorV2(),
-            ])
+            ]
+            self.tf = A.Compose(tf_list)
         else:
             self.tf = None
 
@@ -107,10 +132,18 @@ class NumberClassifierDataset(Dataset):
         path, label = self.samples[idx]
         img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
         if img is None:
-            img = np.zeros((INPUT_SIZE, INPUT_SIZE), dtype=np.uint8)
-        if img.shape != (INPUT_SIZE, INPUT_SIZE):
-            img = cv2.resize(img, (INPUT_SIZE, INPUT_SIZE),
+            img = np.zeros((self.input_h, self.input_w), dtype=np.uint8)
+        if img.shape != (self.input_h, self.input_w):
+            img = cv2.resize(img, (self.input_w, self.input_h),
                               interpolation=cv2.INTER_NEAREST)
+        if self.morph_aug and self.augment and np.random.rand() < 0.5:
+            # Random ±1px morphological dilation OR erosion (binary mask
+            # quality variation).
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            if np.random.rand() < 0.5:
+                img = cv2.dilate(img, kernel, iterations=1)
+            else:
+                img = cv2.erode(img, kernel, iterations=1)
         if self.augment:
             img_t = self.tf(image=img)["image"].float()
         else:

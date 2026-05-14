@@ -30,7 +30,7 @@ from src.homography.keypoint_track_bank import KeypointTrackBank
 RANSAC_REPROJ_PX = 4.0
 MIN_CORRS_FOR_H = 4    # cv2.findHomography minimum; 4 non-collinear pts → H
 
-FULL_H_SANITY_MAX_YD = 0.5
+FULL_H_SANITY_MAX_YD = 2.0
 
 DELTA_MAX_SCALE = 1.8
 DELTA_MAX_ROT_DEG = 3.0
@@ -41,7 +41,14 @@ DELTA_MAX_TRANS_PX = 400
 # canonical field position. Catches false hashes + mis-classified hashes
 # before they get into RANSAC. Generous enough to absorb 1 frame of camera
 # motion at 30 fps.
-PREFILTER_TOL_YD = 0.5
+#
+# Effectively disabled (large tolerance) as of 2026-05-02 after diagnosing
+# play_046 sideline-drift: the 0.5yd cap was silently culling far-sideline
+# corrs once H_prev wobbled (e.g. when near-sideline corrs panned out of
+# frame), creating a feedback loop where each frame's H drifted from a
+# biased corr subset. Re-enable only with a much larger threshold OR after
+# replacing with a per-corr-kind tolerance.
+PREFILTER_TOL_YD = 999.0
 
 # Degenerate-config check: collapse correspondences onto NGS-y rows OR
 # NGS-x columns (round to nearest 0.5yd to bucket discrete row positions
@@ -117,6 +124,158 @@ def smooth_hs(Hs_raw, window: int = 7, poly: int = 2):
     return [sm[i].reshape(3, 3) for i in range(len(Hs_raw))]
 
 
+def _loo_poly_at(Hs, i, half=3, poly=2):
+    """Degree-`poly` poly per H coefficient through {i-half..i+half}\\{i}.
+
+    Hs is a list of 3×3 matrices (no Nones). Returns the LOO-extrapolated
+    3×3 H at index i, or None if too few neighbors to fit.
+    """
+    n = len(Hs)
+    lo = max(0, i - half); hi = min(n, i + half + 1)
+    xs = [j for j in range(lo, hi) if j != i]
+    if len(xs) < poly + 1: return None
+    ys = np.stack([Hs[j].flatten() for j in xs], axis=0)
+    xs_a = np.array(xs, dtype=np.float64)
+    out = np.zeros(9, dtype=np.float64)
+    for c in range(9):
+        coef = np.polyfit(xs_a, ys[:, c], poly)
+        out[c] = np.polyval(coef, i)
+    return out.reshape(3, 3)
+
+
+def _corner_residual_yd(H_a, H_b, img_w=1280, img_h=720, margin=100):
+    """Max corner reprojection distance (NGS yards) between two H matrices,
+    using 4 interior image corners as probes."""
+    if H_a is None or H_b is None: return None
+    pts = np.array([[margin, margin], [img_w - margin, margin],
+                    [img_w - margin, img_h - margin], [margin, img_h - margin]],
+                   dtype=np.float64)
+    pts_h = np.column_stack([pts, np.ones(4)])
+    pa = (H_a @ pts_h.T).T; za = pa[:, 2:3]; za[np.abs(za) < 1e-9] = 1e-9
+    pb = (H_b @ pts_h.T).T; zb = pb[:, 2:3]; zb[np.abs(zb) < 1e-9] = 1e-9
+    return float(np.max(np.linalg.norm(pa[:, :2]/za - pb[:, :2]/zb, axis=1)))
+
+
+def loo_filter_and_replace(Hs_raw, rmses=None,
+                              thr_loo_yd: float = 0.20,
+                              thr_rmse_yd: float = 0.30,
+                              half: int = 3, poly: int = 2,
+                              img_w: int = 1280, img_h: int = 720):
+    """Detect bad H frames via leave-one-out polynomial residual + rmse
+    threshold, and replace them with the LOO polynomial extrapolation.
+
+    For each frame, fits a degree-`poly` polynomial per H coefficient
+    through the `half` neighbors on each side (excluding the frame itself),
+    measures the max-corner reprojection distance between the raw H and the
+    LOO H in NGS yards, and flags the frame if:
+      • loo_resid > thr_loo_yd, OR
+      • rmses[i] is provided and rmses[i] > thr_rmse_yd
+    Flagged frames are replaced with their LOO polynomial H.
+
+    Args:
+        Hs_raw: list of 3×3 H matrices (Nones allowed; they're treated as
+            already-bad and replaced with LOO H if possible).
+        rmses: optional parallel list of per-frame solver rmse_yd (or None
+            per frame). When provided, contributes to the red mask via the
+            rmse threshold.
+        thr_loo_yd: LOO residual threshold in NGS yards.
+        thr_rmse_yd: rmse threshold in NGS yards.
+        half: number of neighbors on each side for the polynomial fit.
+        poly: polynomial degree.
+        img_w / img_h: image dimensions used for corner reprojection.
+
+    Returns:
+        (Hs_out, red_mask, loo_resids):
+            Hs_out: list of 3×3 H matrices with red frames replaced by LOO.
+                Frames where LOO is unavailable (clip edges) keep their
+                raw value (or None if it was None).
+            red_mask: list[bool] same length as Hs_raw.
+            loo_resids: list[float | None] per-frame LOO residual in yards.
+    """
+    n = len(Hs_raw)
+    Hs_out = list(Hs_raw)
+    red_mask = [False] * n
+    loo_resids = [None] * n
+
+    # Build a contiguous sequence of frames whose raw H is not None, plus a
+    # mapping back to the original index space.
+    seq_idx = [i for i in range(n) if Hs_raw[i] is not None]
+    seq_H = [Hs_raw[i] for i in seq_idx]
+
+    # Per-frame LOO residual against the raw H.
+    for local_i, gi in enumerate(seq_idx):
+        H_loo = _loo_poly_at(seq_H, local_i, half=half, poly=poly)
+        if H_loo is None: continue
+        loo_resids[gi] = _corner_residual_yd(Hs_raw[gi], H_loo,
+                                               img_w=img_w, img_h=img_h)
+
+    # Red mask: missing H OR loo > thr OR rmse > thr.
+    for i in range(n):
+        if Hs_raw[i] is None:
+            red_mask[i] = True; continue
+        if loo_resids[i] is not None and loo_resids[i] > thr_loo_yd:
+            red_mask[i] = True
+        if rmses is not None and rmses[i] is not None and rmses[i] > thr_rmse_yd:
+            red_mask[i] = True
+
+    # Build the GOOD-only sequence and fit LOO polys through it for the
+    # bad frames. This is the "drop the bad and re-fit through clean
+    # neighbors" step the user asked for.
+    good_idx = [i for i in range(n) if not red_mask[i] and Hs_raw[i] is not None]
+    good_H = [Hs_raw[i] for i in good_idx]
+    if not good_idx:
+        return Hs_out, red_mask, loo_resids
+
+    # For each red frame, fit polynomial through good neighbors (3 on each
+    # side of the frame's position in the global-frame indexing) and
+    # evaluate at the frame.
+    good_arr = np.array(good_idx, dtype=np.float64)
+    for i in range(n):
+        if not red_mask[i]: continue
+        # Find indices of good frames bracketing i.
+        right_pos = int(np.searchsorted(good_arr, i, side="right"))
+        left_pos = right_pos - 1
+        left_neighbors = good_idx[max(0, left_pos - half + 1):right_pos]
+        right_neighbors = good_idx[right_pos:right_pos + half]
+        nb = left_neighbors + right_neighbors
+        if len(nb) < poly + 1:
+            # Not enough good neighbors to fit. Keep raw (or None).
+            continue
+        Hs_nb = [Hs_raw[j] for j in nb]
+        xs = np.array(nb, dtype=np.float64)
+        ys = np.stack([h.flatten() for h in Hs_nb], axis=0)
+        H_fill = np.zeros(9, dtype=np.float64)
+        for c in range(9):
+            coef = np.polyfit(xs, ys[:, c], poly)
+            H_fill[c] = np.polyval(coef, i)
+        Hs_out[i] = H_fill.reshape(3, 3)
+
+    return Hs_out, red_mask, loo_resids
+
+
+def detect_bad_runs(red_mask, min_length: int = 5):
+    """Return list of (start, end_exclusive) for runs of ≥min_length
+    consecutive red frames in `red_mask`. Useful for flagging stretches
+    where the H trajectory was bridged across a long gap — the bridge may
+    be inaccurate, and the clip is a candidate for manual review or
+    rejection at data-collection time.
+    """
+    runs = []
+    n = len(red_mask)
+    i = 0
+    while i < n:
+        if red_mask[i]:
+            j = i
+            while j < n and red_mask[j]:
+                j += 1
+            if j - i >= min_length:
+                runs.append((i, j))
+            i = j
+        else:
+            i += 1
+    return runs
+
+
 def detect_lost(methods, min_sustained_loss: int = 3):
     """Return the index of the first frame in the FIRST sustained-carry run,
     or None if no such run exists. Once `min_sustained_loss` consecutive
@@ -189,28 +348,25 @@ class HomographyTrackerLite:
     def update(self, corrs, frame_idx):
         """Returns dict with H, method, n_corrs, n_inliers, rmse_yd, info."""
         n_in = len(corrs)
-        # Pre-filter against H_prev: drop corrs whose pixel doesn't project
-        # to its claimed canonical field position. Catches false hashes
-        # and mis-classified hashes before they pollute the H solve.
-        if self.H_prev is not None and corrs:
-            kept = []
-            n_dropped = 0
-            for c in corrs:
-                px = c["pixel_u"]
-                f_via_prev = pixel_to_field(
-                    px.reshape(1, 2), self.H_prev,
-                )[0]
-                if np.linalg.norm(f_via_prev - c["field"]) <= PREFILTER_TOL_YD:
-                    kept.append(c)
-                else:
-                    n_dropped += 1
-            corrs = kept
-            if n_dropped:
-                # store for diagnostics
-                pass
+        # Per-corr prefilter via the keypoint bank. Three groups returned:
+        #   - kept: passes all checks → goes to RANSAC
+        #   - probationary: brand-new identity, no conflicts → observed in
+        #     the bank (so it can be promoted later) but NOT used in this
+        #     frame's H
+        #   - rejected (cross-track or same-track failure): not observed,
+        #     not used
+        # See KeypointTrackBank.prefilter_corrs for the three checks.
+        if corrs:
+            corrs, probationary, prefilter_diag = self.bank.prefilter_corrs(
+                corrs, frame_idx=frame_idx)
+        else:
+            probationary = []
+            prefilter_diag = {"n_input": 0, "n_kept": 0, "n_probationary": 0,
+                              "n_dropped_self": 0, "n_dropped_cross": 0}
         H, inl, rmse = solve_h(corrs) if corrs else (None, None, None)
         method = None
-        info = {"n_input_corrs": n_in, "n_after_prefilter": len(corrs)}
+        info = {"n_input_corrs": n_in, "n_after_prefilter": len(corrs),
+                "prefilter": prefilter_diag}
 
         # Full path (with sanity + bank validation).
         if H is not None:
@@ -253,9 +409,12 @@ class HomographyTrackerLite:
         if method == "full":
             H_inv = np.linalg.inv(H)
 
-        # Update state. Only observe on real-H frames (full or delta).
+        # Update state. Observe on real-H frames (full or delta). Both
+        # kept corrs (used in this frame's H) and probationary corrs
+        # (held back from H but accumulating evidence so they can be
+        # promoted in future frames) are recorded.
         if method in ("full", "delta"):
-            self.bank.observe(corrs, frame_idx=frame_idx)
+            self.bank.observe(corrs + probationary, frame_idx=frame_idx)
             self.bank.prune(frame_idx=frame_idx)
         self.H_prev = H
         self.H_inv_prev = H_inv
