@@ -336,7 +336,7 @@ def collate(batch):
 def make_backbone_logits_fn(ckpt_path: str, arch: str,
                                 device: torch.device):
     from train_compare_classifiers import build_model
-    from train_number_classifier import PIXEL_MEAN, PIXEL_STD
+    from number_classifier_constants import PIXEL_MEAN, PIXEL_STD
     ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     state = ck.get("model_state_dict", ck)
     classes = ck.get("classes", CLASSES)

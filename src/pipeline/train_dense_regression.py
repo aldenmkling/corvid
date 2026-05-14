@@ -875,7 +875,7 @@ def main():
     if not intrinsics_by_clip:
         print("WARNING: manifest has no 'intrinsics_by_clip' — GT will be "
               "computed without lens undistortion. Run "
-              "scripts/data_prep/inject_intrinsics_into_manifest.py to fix.")
+              "scripts/aux/data_prep/inject_intrinsics_into_manifest.py to fix.")
     else:
         print(f"Loaded intrinsics for {len(intrinsics_by_clip)} clips")
 

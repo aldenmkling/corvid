@@ -64,13 +64,12 @@ class MitClassifier(nn.Module):
         return self.head(feats[-1])
 
 
-CLASSES = ["10L", "10R", "20L", "20R", "30L", "30R", "40L", "40R", "50"]
-NUM_CLASSES = len(CLASSES)
-INPUT_SIZE = 64
-# For 1-channel input, timm averages 3-channel ImageNet pretrain stats. Use
-# the average of the RGB mean/std as a single-channel reference.
-PIXEL_MEAN = 0.456
-PIXEL_STD = 0.224
+# Imported from src/pipeline/number_classifier_constants.py so the
+# production pipeline can share these values without depending on this
+# training entry point.
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'src', 'pipeline'))
+from number_classifier_constants import CLASSES, NUM_CLASSES, INPUT_SIZE, PIXEL_MEAN, PIXEL_STD
 
 
 class NumberClassifierDataset(Dataset):
