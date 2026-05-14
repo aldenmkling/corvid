@@ -18,8 +18,8 @@ TAR=/tmp/train_crop_payload.tar.gz
 tar -czf "$TAR" \
     --exclude=__pycache__ --exclude=*.pyc \
     -C "$ROOT" \
-    src/pipeline/crop_classifier.py \
-    src/pipeline/number_classifier_constants.py \
+    src/field_mapping/crop_classifier.py \
+    src/field_mapping/classes.py \
     scripts/aux/training/train_crop_classifier.py \
     scripts/aux/runpod/requirements_farm_runpod.txt \
     data/number_classifier/round3_128x32

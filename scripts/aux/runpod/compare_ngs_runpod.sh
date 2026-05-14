@@ -24,7 +24,9 @@ tar -czf "$TAR" \
     --exclude=__pycache__ --exclude=*.pyc \
     -C "$ROOT" \
     src \
-    src/pipeline \
+    src/field_mapping \
+    src/player_detection \
+    src/player_tracking \
     scripts/aux/data_prep \
     scripts/aux/compare/compare_ngs.py \
     scripts/aux/runpod/requirements_farm_runpod.txt \

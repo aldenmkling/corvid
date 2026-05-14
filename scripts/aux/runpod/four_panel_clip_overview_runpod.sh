@@ -19,9 +19,11 @@ tar -czf "$TAR" \
     --exclude=__pycache__ --exclude=*.pyc \
     -C "$ROOT" \
     src \
-    src/pipeline \
+    src/field_mapping \
+    src/player_detection \
+    src/player_tracking \
     scripts/aux/data_prep \
-    scripts/aux/viz/make_play_065_4panel.py \
+    scripts/aux/viz/four_panel_clip_overview.py \
     scripts/aux/runpod/requirements_farm_runpod.txt \
     models/unet_unified_v8_yardside_recover/best.pth \
     models/token_only_v10_phase1_pseudo/best.pth \
@@ -44,7 +46,7 @@ $SSH "cd /workspace && tar -xzf payload.tar.gz && rm payload.tar.gz \
 
 echo "=== running 4-panel viz ==="
 $SSH "cd /workspace && source venv/bin/activate \
-    && python scripts/aux/viz/make_play_065_4panel.py --device cuda 2>&1"
+    && python scripts/aux/viz/four_panel_clip_overview.py --device cuda 2>&1"
 
 echo "=== downloading output ==="
 mkdir -p "$ROOT/output/play_065_visuals"

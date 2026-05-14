@@ -254,16 +254,16 @@ def upload_dataset(args):
         train_script = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "train_unet_hash.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "requirements_unet_runpod.txt")
     elif tt == 'unet-unified':
-        train_script = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "train_unet_unified.py")
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "train_unet.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "requirements_unet_runpod.txt")
     elif tt == 'unet-numbers':
         train_script = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "train_unet_numbers.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "requirements_unet_runpod.txt")
     elif tt == 'number-classifier':
-        train_script = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "train_number_classifier.py")
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "train_crop_classifier_mit.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "requirements_unet_runpod.txt")
     else:
-        train_script = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "train_rfdetr.py")
+        train_script = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "train_player_detector.py")
         requirements = os.path.join(PROJECT_ROOT, "scripts", "aux", "training", "requirements_runpod.txt")
 
     print("  Uploading training script...")
