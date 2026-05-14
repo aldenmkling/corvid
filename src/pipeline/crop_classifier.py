@@ -54,10 +54,14 @@ class _DSBlock(nn.Module):
         self.act = nn.ReLU(inplace=True)
 
     def forward(self, x):
+        identity = x
         x = self.act(self.bn1(self.dw(x)))
         x = self.bn2(self.pw(x))
         if self.se is not None:
             x = self.se(x)
+        # Residual when shapes align (stride=1 + in_ch==out_ch).
+        if identity.shape == x.shape:
+            x = x + identity
         return self.act(x)
 
 

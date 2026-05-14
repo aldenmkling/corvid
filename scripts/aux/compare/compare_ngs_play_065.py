@@ -471,7 +471,9 @@ def compute_cost_matrix(dot_field, ngs_by_player, our_snap_frame, snap_frame_ngs
 
 
 def sweep_snap_offset(dot_field, ngs_by_player, snap_frame_ngs, cutoff,
-                       center=SWEEP_FRAME_CENTER, radius=SWEEP_FRAME_RADIUS):
+                       center=None, radius=None):
+    if center is None: center = SWEEP_FRAME_CENTER
+    if radius is None: radius = SWEEP_FRAME_RADIUS
     """Sweep candidate our-snap-frame in [center-radius, center+radius]
     at 10-Hz step (=STRIDE). Return (best_offset, best_total_cost, sweep_log).
     """
@@ -754,7 +756,7 @@ def main():
     # ── Summary ──────────────────────────────────────────────────────────────
     summary_path = os.path.join(out_dir, f"{tag}_summary.txt")
     with open(summary_path, "w") as f:
-        f.write(f"# play_065 vs NGS (TSV: 2019_KC_2019092204_1643.tsv)\n\n")
+        f.write(f"# {tag} vs NGS (TSV: {os.path.basename(ngs_path)})\n\n")
         f.write(f"Our cutoff frames: {cutoff} @ {OUR_FPS} fps\n")
         f.write(f"NGS players: {len(ngs_by_player)}, snap_frame_ngs: {snap_frame_ngs}\n")
         f.write(f"Best our-snap-frame: {best_offset} (= {best_offset/OUR_FPS:.2f}s into clip)\n")
