@@ -31,7 +31,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 sys.path.insert(0, PROJECT_ROOT)
 
-from src.homography.field_model import (
+from src.field_mapping.field_model import (
     FIELD_LENGTH, FIELD_WIDTH, HASH_Y_NEAR, HASH_Y_FAR,
 )
 

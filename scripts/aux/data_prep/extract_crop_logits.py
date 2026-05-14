@@ -40,12 +40,11 @@ except Exception: pass
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "src", "pipeline"))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts", "data_prep"))
 
-from cc_tokenizer_v2 import SRC_W, SRC_H, null_classifier  # noqa: E402
-from cc_tokenizer_v3 import cc_tokens_from_frame_v3  # noqa: E402
-from train_rf_a import make_painted_logits_fn  # noqa: E402
+from src.field_mapping.tokenizer import SRC_W, SRC_H, null_classifier  # noqa: E402
+from src.field_mapping.tokenizer import tokenize_frame as cc_tokens_from_frame_v3  # noqa: E402
+from src.field_mapping.crop_classifier import make_painted_logits_fn  # noqa: E402
 
 TYPE_NUM = 3
 UH, UW = 512, 896

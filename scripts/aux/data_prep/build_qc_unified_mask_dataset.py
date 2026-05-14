@@ -42,7 +42,7 @@ from src.homography.specialists import (
     LINE_WEIGHTS, HASH_WEIGHTS, NUMBER_WEIGHTS,
     run_specialists,
 )
-from src.homography.field_model import (
+from src.field_mapping.field_model import (
     FIELD_WIDTH, HASH_Y_NEAR, HASH_Y_FAR, NUMBER_Y_NEAR, NUMBER_Y_FAR,
 )
 

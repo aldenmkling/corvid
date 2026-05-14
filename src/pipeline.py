@@ -1,346 +1,288 @@
-#!/usr/bin/env python3
-"""
-Full inference pipeline: video → detection → tracking → homography → tracking CSV.
+"""End-to-end inference pipeline: clip → per-frame player tracking CSV.
 
-Processes a single play clip through:
-  1. Frame extraction from video
-  2. Player detection (RF-DETR or YOLO)
-  3. Multi-object tracking (BoT-SORT)
-  4. Homography mapping (pixel → field coordinates)
-  5. Output tracking data in NGS-compatible format
+Stages:
+  1. field_mapping  — UNet → tokens → encoder → number_refiner → token_labeler
+                      → keypoints → solve H per frame → LOO filter → smooth
+  2. player_detection — RF-DETR per frame (in undistorted image space)
+  3. player_tracking — Kalman + multi-cue association in NGS yards
+  4. team_classification — color PCA + median split, 11/11 forced
+  5. trajectory_smoothing — per-track Sav-Gol before differentiating
+
+Output CSV columns:
+    frame_idx, track_id, x_yd, y_yd, team, in_bad_run
 
 Usage:
-  python -m src.pipeline --video videos/clips/2019092204/play_001/sideline.mp4 \
-                         --weights models/rfdetr_best.pt \
-                         --output output/tracking/
+    python -m src.pipeline --clip <path> --out <csv> [--device cuda|mps|cpu]
 """
+from __future__ import annotations
 
 import argparse
-import csv
+import json
 import os
 import sys
 import time
-from pathlib import Path
 
 import cv2
 import numpy as np
+import torch
+from scipy.signal import savgol_filter
 
-# Add project root to path for imports
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.detector import Detections, create_detector
-from src.tracker import PlayerTracker, TrackingResult
-from src.smoothing import smooth_all_trajectories, SmoothedTrajectory
-
-
-def extract_frames(video_path: str) -> tuple[list[np.ndarray], float]:
-    """Extract all frames from a video file.
-
-    Returns:
-        (frames, fps) — list of BGR frames and the video's frame rate.
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise FileNotFoundError(f"Cannot open video: {video_path}")
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frames = []
-
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        frames.append(frame)
-
-    cap.release()
-    return frames, fps
+from src.field_mapping.pipeline import FieldMappingPipeline
+from src.field_mapping.homography import (
+    HomographyTrackerLite, smooth_hs, loo_filter_and_replace,
+    detect_bad_runs,
+)
+from src.player_detection.detector import RFDETRDetector
+from src.player_tracking.tracker import PlayerTracker
+from src.player_tracking.team_classifier import (
+    select_long_tracks, classify_teams_color_pca,
+)
 
 
-def process_play(
-    video_path: str,
-    detector,
-    tracker: PlayerTracker,
-    homography_fn=None,
-    verbose: bool = True,
-) -> dict:
-    """Process a single play clip through the full pipeline.
+# Pipeline parameters (production defaults).
+RMSE_THR_YD = 0.30
+LOO_THR_YD = 0.20
+CARRY_STREAK_LOST = 3        # 3+ consecutive H-solver failures → clip lost
+BAD_RUN_MIN_LEN = 5          # consec red frames → mark as bad-run stretch
+SMOOTH_WINDOW_H = 7          # Sav-Gol window for H trajectory
+SMOOTH_POLY_H = 2
+SMOOTH_WINDOW_TRACK = 9      # Sav-Gol window for per-track NGS positions
+SMOOTH_POLY_TRACK = 2
+
+DETECTOR_CONF_THRESH = 0.3
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _dot_pixel_from_xyxy(xyxy: np.ndarray) -> np.ndarray:
+    """Player position estimate: middle-x, 95% from top of box to bottom."""
+    x0, y0, x1, y1 = float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
+    return np.array([0.5 * (x0 + x1), y0 + 0.95 * (y1 - y0)], dtype=np.float64)
+
+
+def _project_via_H(pts_pixel: np.ndarray, H: np.ndarray) -> np.ndarray:
+    if len(pts_pixel) == 0:
+        return np.empty((0, 2), dtype=np.float64)
+    homo = np.column_stack([pts_pixel, np.ones(len(pts_pixel))])
+    proj = (H @ homo.T).T
+    w = proj[:, 2:3]
+    w = np.where(np.abs(w) < 1e-12, np.nan, w)
+    return proj[:, :2] / w
+
+
+def run_pipeline(clip_path: str, device,
+                  K: np.ndarray | None = None,
+                  dist: np.ndarray | None = None,
+                  verbose: bool = True):
+    """Run the full pipeline on a clip. Returns dict with per-track field-coord
+    arrays + team labels + bad-run mask.
 
     Args:
-        video_path: Path to the play clip (sideline or endzone MP4).
-        detector: A detector instance (YOLODetector or RFDETRDetector).
-        tracker: A PlayerTracker instance (freshly initialized for this play).
-        homography_fn: Optional callable(frame) -> H matrix. If None, skips
-                       field coordinate mapping and outputs pixel coords only.
-        verbose: Print progress info.
+        clip_path: path to sideline.mp4
+        device: torch device (cuda/mps/cpu)
+        K, dist: camera intrinsics. If None, falls back to K=I, dist=0
+            (the H absorbs residual radial distortion).
+        verbose: print progress.
 
     Returns:
-        dict with keys:
-            'trajectories': dict of track_id -> PlayerTrajectory
-            'fps': float
-            'n_frames': int
-            'timings': dict of stage -> total seconds
+        dict with:
+          n_frames: total frames in clip
+          cutoff:   number of frames before sustained tracking loss
+          Hs:       list[N] of (3,3) smoothed H per frame (None where lost)
+          long_track_ids: set of track_ids that survived the long-track filter
+          dot_field: dict[track_id -> (N, 2) array of NGS yard positions
+                       (smoothed). NaN where the track wasn't detected.]
+          team_labels: dict[track_id -> 'team_A' | 'team_B' | 'unknown']
+          bad_run_mask: bool list[N] — True where H was bridged across a long
+                         red-frame run (likely clip-disqualification candidate)
+          fps: source frames per second
     """
-    if verbose:
-        print(f"  Loading video: {video_path}")
+    if K is None: K = np.eye(3, dtype=np.float64)
+    if dist is None: dist = np.zeros(5, dtype=np.float64)
 
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise FileNotFoundError(f"Cannot open video: {video_path}")
+    # Models (loaded once, used per frame).
+    if verbose: print("Loading field-mapping pipeline ...")
+    fm_pipe = FieldMappingPipeline(device, project_root=PROJECT_ROOT)
+    if verbose: print("Loading detector + tracker ...")
+    detector = RFDETRDetector(
+        weights=os.path.join(PROJECT_ROOT, "models/rfdetr_best_ema.pth"),
+        device=str(device), conf_thresh=DETECTOR_CONF_THRESH)
+    tracker = PlayerTracker(device=str(device), frame_rate=30)
+    h_tracker = HomographyTrackerLite()
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    # ── Pass 1: per-frame H + detect + track ─────────────────────────────
+    cap = cv2.VideoCapture(clip_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    n_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if verbose: print(f"Clip: {n_total} frames @ {fps:.1f} fps")
 
-    timings = {"detect": 0.0, "track": 0.0, "homography": 0.0, "total": 0.0}
-    t_start = time.time()
-    frame_idx = 0
+    per_frame = []           # list of {H, method, rmse}
+    track_results = []
+    frames_u = []
+    t0 = time.time()
+    for fi in range(n_total):
+        ok, fr = cap.read()
+        if not ok: break
+        if fr.shape[1] != 1280: fr = cv2.resize(fr, (1280, 720))
+        fr_u = cv2.undistort(fr, K, dist)
+        frames_u.append(fr_u)
 
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
+        fm_out = fm_pipe(fr, K, dist)
+        if fm_out is None:
+            per_frame.append(None)
+        else:
+            res = h_tracker.update(fm_out["corrs"], frame_idx=fi)
+            per_frame.append({"H": res["H"], "method": res["method"],
+                              "rmse": res["rmse_yd"]})
 
-        # --- Detection ---
-        t0 = time.time()
-        detections = detector.detect(frame)
-        timings["detect"] += time.time() - t0
+        H_for_tracker = per_frame[-1]["H"] if per_frame[-1] else None
+        dets = detector.detect(fr_u)
+        tr = tracker.update(dets, fr_u, H=H_for_tracker, K=K, dist=dist)
+        track_results.append(tr)
 
-        # --- Tracking ---
-        t0 = time.time()
-        tracking_result = tracker.update(detections, frame)
-        timings["track"] += time.time() - t0
-
-        # --- Homography (field coordinate mapping) ---
-        if homography_fn is not None:
-            t0 = time.time()
-            H = homography_fn(frame)
-            if H is not None and len(tracking_result) > 0:
-                foot_points = tracking_result.foot_points
-                # Apply homography to foot points
-                from src.homography.apply_homography import pixel_to_field, is_on_field
-                field_coords = pixel_to_field(foot_points, H)
-                on_field = is_on_field(field_coords)
-
-                # Update trajectory points with field coordinates
-                for i, player in enumerate(tracking_result.players):
-                    traj = tracker.trajectories.get(player.track_id)
-                    if traj and traj.points:
-                        last_point = traj.points[-1]
-                        if on_field[i]:
-                            last_point.field_xy = field_coords[i].copy()
-                        else:
-                            last_point.interrupted = True
-            timings["homography"] += time.time() - t0
-
-        frame_idx += 1
-        if verbose and frame_idx % 30 == 0:
-            elapsed = time.time() - t_start
-            fps_actual = frame_idx / elapsed
-            print(f"    Frame {frame_idx}/{n_frames} "
-                  f"({fps_actual:.1f} fps, "
-                  f"{len(tracking_result)} players tracked)")
-
+        if verbose and (fi + 1) % 50 == 0:
+            dt = time.time() - t0
+            print(f"  [{fi+1}/{n_total}] {dt:.0f}s ({(fi+1)/dt:.1f} fps)")
     cap.release()
-    timings["total"] = time.time() - t_start
+    if verbose: print(f"  pass 1 in {time.time()-t0:.0f}s")
 
+    # ── Carry-streak cutoff ─────────────────────────────────────────────
+    cutoff = len(per_frame)
+    streak = 0; run_start = None
+    for i, r in enumerate(per_frame):
+        m = r["method"] if r else "none"
+        if m == "carry":
+            if streak == 0: run_start = i
+            streak += 1
+            if streak >= CARRY_STREAK_LOST:
+                cutoff = run_start; break
+        else:
+            streak = 0; run_start = None
+    if verbose: print(f"  cutoff: {cutoff}/{len(per_frame)}")
+
+    # ── LOO filter + replacement + Sav-Gol smoothing on H trajectory ────
+    Hs = [r["H"] if (r and r["H"] is not None) else None
+          for r in per_frame[:cutoff]]
+    rmses = [r["rmse"] if (r and r.get("rmse") is not None) else None
+             for r in per_frame[:cutoff]]
+    Hs_clean, red_mask, _ = loo_filter_and_replace(
+        Hs, rmses=rmses,
+        thr_loo_yd=LOO_THR_YD, thr_rmse_yd=RMSE_THR_YD)
+    valid_idx = [i for i in range(cutoff) if Hs_clean[i] is not None]
+    if len(valid_idx) >= SMOOTH_WINDOW_H:
+        sm = smooth_hs([Hs_clean[i] for i in valid_idx],
+                        window=SMOOTH_WINDOW_H, poly=SMOOTH_POLY_H)
+        for vi, si in enumerate(valid_idx):
+            Hs_clean[si] = sm[vi]
+    bad_runs = detect_bad_runs(red_mask, min_length=BAD_RUN_MIN_LEN)
+    bad_run_mask = [False] * cutoff
+    for s, e in bad_runs:
+        for k in range(s, e): bad_run_mask[k] = True
+    if verbose and bad_runs:
+        print(f"  bad runs (≥{BAD_RUN_MIN_LEN} consec): {bad_runs}")
+
+    # ── Team classify long tracks ───────────────────────────────────────
+    trajectories = tracker.trajectories
+    long_track_ids = select_long_tracks(
+        trajectories, min_meas_frac=0.5, n_valid_frames=cutoff)
     if verbose:
-        print(f"  Done: {frame_idx} frames in {timings['total']:.1f}s "
-              f"({frame_idx / timings['total']:.1f} fps)")
-        print(f"    Detection:  {timings['detect']:.1f}s "
-              f"({timings['detect']/frame_idx*1000:.0f}ms/frame)")
-        print(f"    Tracking:   {timings['track']:.1f}s "
-              f"({timings['track']/frame_idx*1000:.0f}ms/frame)")
-        if homography_fn:
-            print(f"    Homography: {timings['homography']:.1f}s "
-                  f"({timings['homography']/frame_idx*1000:.0f}ms/frame)")
+        print(f"  long tracks: {len(long_track_ids)}/{len(trajectories)}")
+    team_labels, _ = classify_teams_color_pca(
+        trajectories, clip_path, n_samples_per_track=12,
+        long_track_ids=long_track_ids)
+
+    # ── Per-track field positions (NGS yards) ───────────────────────────
+    dot_field = {tid: np.full((cutoff, 2), np.nan, dtype=np.float64)
+                 for tid in long_track_ids}
+    for fi in range(cutoff):
+        H = Hs_clean[fi]
+        if H is None: continue
+        for p in track_results[fi].players:
+            if p.track_id not in long_track_ids: continue
+            dp = _dot_pixel_from_xyxy(p.xyxy)
+            fxy = _project_via_H(dp[None], H)[0]
+            if np.isfinite(fxy).all():
+                dot_field[p.track_id][fi] = fxy
+
+    # Per-track Sav-Gol smoothing.
+    for tid, arr in dot_field.items():
+        valid = ~np.isnan(arr[:, 0])
+        in_seg = False; start = 0; segs = []
+        for i in range(cutoff):
+            if valid[i] and not in_seg: start = i; in_seg = True
+            elif not valid[i] and in_seg: segs.append((start, i)); in_seg = False
+        if in_seg: segs.append((start, cutoff))
+        for s, e in segs:
+            L = e - s
+            if L < SMOOTH_WINDOW_TRACK: continue
+            w = SMOOTH_WINDOW_TRACK
+            if w > L: w = L if L % 2 == 1 else L - 1
+            if w < SMOOTH_POLY_TRACK + 2: continue
+            arr[s:e, 0] = savgol_filter(arr[s:e, 0], w, SMOOTH_POLY_TRACK)
+            arr[s:e, 1] = savgol_filter(arr[s:e, 1], w, SMOOTH_POLY_TRACK)
 
     return {
-        "trajectories": tracker.get_trajectories(),
+        "n_frames": n_total,
+        "cutoff": cutoff,
+        "Hs": Hs_clean,
+        "long_track_ids": long_track_ids,
+        "dot_field": dot_field,
+        "team_labels": team_labels,
+        "bad_run_mask": bad_run_mask,
         "fps": fps,
-        "n_frames": frame_idx,
-        "timings": timings,
     }
 
 
-def trajectories_to_csv(
-    trajectories: dict,
-    output_path: str,
-    fps: float,
-    game_id: str = "",
-    play_id: str = "",
-    smoothed: dict[int, SmoothedTrajectory] | None = None,
-):
-    """Write tracking trajectories to a CSV file in NGS-compatible format.
-
-    If smoothed trajectories are provided, outputs 10fps smoothed data with
-    velocity/acceleration columns. Otherwise outputs raw 30fps data.
-
-    Output columns match NGS tracking data structure:
-        gameId, playId, frame, track_id, x, y, confidence, interrupted
-
-    Field coordinates (x, y) are in NGS convention:
-        x: 0-120 yards (end line to end line)
-        y: 0-53.33 yards (sideline to sideline)
-
-    Frames with no field coordinates (homography unavailable or off-field)
-    will have NaN for x/y.
-    """
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-
+def write_csv(result: dict, out_path: str):
+    """Write per-frame, per-track NGS-yard positions to CSV."""
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    cutoff = result["cutoff"]
     rows = []
+    for tid in sorted(result["long_track_ids"]):
+        arr = result["dot_field"][tid]
+        team = result["team_labels"].get(tid, "unknown")
+        for fi in range(cutoff):
+            x, y = arr[fi]
+            if not np.isfinite(x) or not np.isfinite(y): continue
+            rows.append((fi, tid, x, y, team, int(result["bad_run_mask"][fi])))
+    with open(out_path, "w") as f:
+        f.write("frame_idx,track_id,x_yd,y_yd,team,in_bad_run\n")
+        for fi, tid, x, y, team, bad in rows:
+            f.write(f"{fi},{tid},{x:.3f},{y:.3f},{team},{bad}\n")
+    print(f"  → {out_path} ({len(rows)} rows)")
 
-    if smoothed:
-        # Output smoothed 10fps data
-        for track_id, straj in sorted(smoothed.items()):
-            for i in range(len(straj.frame_indices)):
-                x = straj.field_xy[i, 0]
-                y = straj.field_xy[i, 1]
-                row = {
-                    "gameId": game_id,
-                    "playId": play_id,
-                    "frame": int(straj.frame_indices[i]),
-                    "time_s": round(float(straj.times[i]), 3),
-                    "track_id": track_id,
-                    "x": round(float(x), 2) if not np.isnan(x) else "",
-                    "y": round(float(y), 2) if not np.isnan(y) else "",
-                    "pixel_x": round(float(straj.pixel_xy[i, 0]), 1),
-                    "pixel_y": round(float(straj.pixel_xy[i, 1]), 1),
-                    "confidence": round(float(straj.confidence[i]), 3),
-                    "interrupted": int(straj.interrupted[i]),
-                }
-                # Add derivative columns if available
-                if straj.speed is not None:
-                    row["speed_yds"] = round(float(straj.speed[i]), 2) if not np.isnan(straj.speed[i]) else ""
-                if straj.velocity is not None:
-                    row["vx"] = round(float(straj.velocity[i, 0]), 2) if not np.isnan(straj.velocity[i, 0]) else ""
-                    row["vy"] = round(float(straj.velocity[i, 1]), 2) if not np.isnan(straj.velocity[i, 1]) else ""
-                if straj.accel_magnitude is not None:
-                    row["accel_yds"] = round(float(straj.accel_magnitude[i]), 2) if not np.isnan(straj.accel_magnitude[i]) else ""
-                rows.append(row)
-    else:
-        # Output raw 30fps data
-        for track_id, traj in sorted(trajectories.items()):
-            for point in traj.points:
-                frame_time = point.frame_idx / fps if fps > 0 else 0.0
-                x = point.field_xy[0] if point.field_xy is not None else np.nan
-                y = point.field_xy[1] if point.field_xy is not None else np.nan
-                rows.append({
-                    "gameId": game_id,
-                    "playId": play_id,
-                    "frame": point.frame_idx,
-                    "time_s": round(frame_time, 3),
-                    "track_id": track_id,
-                    "x": round(float(x), 2) if not np.isnan(x) else "",
-                    "y": round(float(y), 2) if not np.isnan(y) else "",
-                    "pixel_x": round(float(point.pixel_xy[0]), 1),
-                    "pixel_y": round(float(point.pixel_xy[1]), 1),
-                    "confidence": round(point.confidence, 3),
-                    "interrupted": int(point.interrupted),
-                })
 
-    # Sort by frame, then track_id
-    rows.sort(key=lambda r: (r["frame"], r["track_id"]))
-
-    if not rows:
-        return 0
-
-    with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=rows[0].keys() if rows else [])
-        writer.writeheader()
-        writer.writerows(rows)
-
-    return len(rows)
+def _load_intrinsics(clip_path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Look up K + dist from data/h_pool_and_intrinsics.json. Returns
+    (K=I, dist=0) fallback if the clip isn't in the manifest."""
+    manifest_path = os.path.join(PROJECT_ROOT, "data", "h_pool_and_intrinsics.json")
+    if not os.path.exists(manifest_path):
+        return np.eye(3, dtype=np.float64), np.zeros(5, dtype=np.float64)
+    rel = os.path.relpath(clip_path, os.path.join(PROJECT_ROOT, "videos/clips"))
+    intr = json.load(open(manifest_path))["intrinsics_by_clip"].get(rel, {})
+    K = np.asarray(intr.get("K", np.eye(3).tolist()), dtype=np.float64)
+    if K.shape == (9,): K = K.reshape(3, 3)
+    dist = np.asarray(intr.get("dist", [0]*5), dtype=np.float64)
+    return K, dist
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Run player tracking pipeline on a play clip"
-    )
-    parser.add_argument("--video", required=True, help="Path to play clip (MP4)")
-    parser.add_argument("--weights", required=True, help="Detection model weights (.pt or .pth)")
-    parser.add_argument("--output", default="output/tracking", help="Output directory")
-    parser.add_argument("--device", default="cpu", help="Device for inference (cpu, cuda, mps)")
-    parser.add_argument("--conf-thresh", type=float, default=0.3, help="Detection confidence threshold")
-    parser.add_argument("--game-id", default="", help="Game ID for output CSV")
-    parser.add_argument("--play-id", default="", help="Play ID for output CSV")
-    parser.add_argument("--no-reid", action="store_true", help="Disable appearance-based ReID")
-    parser.add_argument("--no-homography", action="store_true", help="Skip field coordinate mapping")
-    parser.add_argument("--track-buffer", type=int, default=30, help="Frames to keep lost tracks alive")
-    parser.add_argument("--confidence-gate", type=float, default=0.3,
-                        help="Below this confidence, mark trajectory as interrupted")
-    parser.add_argument("--raw", action="store_true",
-                        help="Output raw 30fps data without smoothing/downsampling")
-    parser.add_argument("--smooth-window", type=int, default=200,
-                        help="Smoothing window in ms (default 200)")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--clip", required=True, help="Path to sideline.mp4")
+    ap.add_argument("--out", required=True, help="Output CSV path")
+    ap.add_argument("--device", default="cuda",
+                    help="cuda | mps | cpu")
+    args = ap.parse_args()
 
-    # --- Initialize detector ---
-    print(f"Initializing detector: {args.weights}")
-    detector = create_detector(
-        args.weights,
-        device=args.device,
-        conf_thresh=args.conf_thresh,
-    )
+    clip_path = (args.clip if os.path.isabs(args.clip)
+                 else os.path.join(PROJECT_ROOT, args.clip))
+    if not os.path.exists(clip_path):
+        sys.exit(f"clip not found: {clip_path}")
 
-    # --- Initialize tracker ---
-    print(f"Initializing tracker (BoT-SORT, reid={'on' if not args.no_reid else 'off'})")
-    tracker = PlayerTracker(
-        device=args.device,
-        with_reid=not args.no_reid,
-        track_buffer=args.track_buffer,
-        confidence_gate=args.confidence_gate,
-    )
+    device = torch.device(args.device)
+    K, dist = _load_intrinsics(clip_path)
 
-    # --- Homography (optional) ---
-    homography_fn = None
-    if not args.no_homography:
-        # TODO: integrate homography per-frame computation
-        # For now, homography requires manual yard line identification.
-        # Will be wired in when automatic yard line ID is ready.
-        print("  Homography: skipped (not yet wired for automatic mode)")
-
-    # --- Run pipeline ---
-    print(f"\nProcessing: {args.video}")
-    result = process_play(
-        video_path=args.video,
-        detector=detector,
-        tracker=tracker,
-        homography_fn=homography_fn,
-        verbose=True,
-    )
-
-    # --- Smoothing (30fps → 10fps) ---
-    smoothed = None
-    if not args.raw:
-        print(f"\nSmoothing trajectories (window={args.smooth_window}ms, 30fps→10fps)...")
-        smoothed = smooth_all_trajectories(
-            trajectories=result["trajectories"],
-            source_fps=result["fps"],
-            target_fps=10.0,
-            window_ms=args.smooth_window,
-        )
-        print(f"  {len(smoothed)} trajectories smoothed "
-              f"(dropped {len(result['trajectories']) - len(smoothed)} short tracks)")
-
-    # --- Output ---
-    video_name = Path(args.video).stem
-    suffix = "_tracking_raw" if args.raw else "_tracking"
-    output_path = os.path.join(args.output, f"{video_name}{suffix}.csv")
-
-    n_rows = trajectories_to_csv(
-        trajectories=result["trajectories"],
-        output_path=output_path,
-        fps=result["fps"],
-        game_id=args.game_id,
-        play_id=args.play_id,
-        smoothed=smoothed,
-    )
-
-    n_tracks = len(smoothed) if smoothed else len(result["trajectories"])
-    out_fps = "10fps smoothed" if smoothed else f"{result['fps']:.0f}fps raw"
-    print(f"\nOutput: {output_path}")
-    print(f"  {n_tracks} players tracked, {n_rows} total data points")
-    print(f"  {result['n_frames']} source frames, output at {out_fps}")
+    result = run_pipeline(clip_path, device, K=K, dist=dist, verbose=True)
+    write_csv(result, args.out)
 
 
 if __name__ == "__main__":

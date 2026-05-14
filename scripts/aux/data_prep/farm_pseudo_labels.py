@@ -55,25 +55,24 @@ except Exception:
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "src", "pipeline"))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts", "data_prep"))
 sys.path.insert(0, PROJECT_ROOT)
 
-from cc_tokenizer_v2 import (
+from src.field_mapping.tokenizer import (
     TYPE_NUM, TYPE_YARD, TYPE_SIDE, TYPE_HASH,
     SRC_W, SRC_H, null_classifier,
 )
-from cc_tokenizer_v3 import cc_tokens_from_frame_v3
-from model_token_v10 import TokenClassifyV10
-from model_token_v10b import TokenClassifyV10b
-from train_token_v6 import N_NGS_X_CLASSES
+from src.field_mapping.tokenizer import tokenize_frame as cc_tokens_from_frame_v3
+from src.field_mapping.encoder import TokenEncoder as TokenClassifyV10
+from src.field_mapping.token_labeler import TokenLabeler as TokenClassifyV10b
+from src.field_mapping.classes import N_NGS_X_CLASSES
 from train_token_v10b_stage2 import PAINTED_TO_21
-from train_rf_a import make_painted_logits_fn, encoder_features
-from train_rf_b import RFB
-from train_token_v10c_stage2 import rfb_forward_with_features_and_row
-from src.homography.keypoints_from_tokens import extract_keypoints
-from src.homography.h_tracker import solve_h
-from src.homography.field_model import (
+from src.field_mapping.crop_classifier import make_painted_logits_fn, encoder_features
+from src.field_mapping.number_refiner import NumberRefiner as RFB
+from src.field_mapping.token_labeler import rfb_forward_with_features_and_row
+from src.field_mapping.keypoints import extract_keypoints
+from src.field_mapping.homography import solve_h
+from src.field_mapping.field_model import (
     FIELD_WIDTH, HASH_Y_NEAR, HASH_Y_FAR,
 )
 from src.homography.painted_numbers import (

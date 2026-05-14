@@ -45,9 +45,8 @@ from torch.utils.data import Dataset, DataLoader
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "src", "pipeline"))
 
-from model_token_v10 import TokenClassifyV10  # noqa: E402
+from src.field_mapping.encoder import TokenEncoder as TokenClassifyV10  # noqa: E402
 
 
 # Constants (inlined to avoid heavy import chain from train_token_v6).

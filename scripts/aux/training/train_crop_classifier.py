@@ -36,10 +36,9 @@ from torch.utils.data import Dataset, DataLoader
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "src", "pipeline"))
 
-from crop_classifier import DSResNet10ww   # noqa: E402
-from number_classifier_constants import (   # noqa: E402
+from src.field_mapping.crop_classifier import CropClassifier as DSResNet10ww
+from src.field_mapping.crop_classifier import (
     CLASSES, NUM_CLASSES, PIXEL_MEAN, PIXEL_STD,
 )
 

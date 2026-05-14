@@ -27,13 +27,12 @@ from torch.utils.data import Dataset, DataLoader
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "src", "pipeline"))
 
-from model_token_v10 import TokenClassifyV10   # noqa: E402
-from model_token_v10b import TokenClassifyV10b   # noqa: E402
-from train_rf_a import encoder_features, N_PAINTED_CLASSES   # noqa: E402
-from train_rf_b import RFB   # noqa: E402
-from train_token_v10c_stage2 import (   # noqa: E402
+from src.field_mapping.encoder import TokenEncoder as TokenClassifyV10   # noqa: E402
+from src.field_mapping.token_labeler import TokenLabeler as TokenClassifyV10b   # noqa: E402
+from src.field_mapping.crop_classifier import encoder_features, N_PAINTED_CLASSES   # noqa: E402
+from src.field_mapping.number_refiner import NumberRefiner as RFB   # noqa: E402
+from src.field_mapping.token_labeler import (   # noqa: E402
     rfb_forward_with_features_and_row, PAINTED_TO_21,
 )
 
