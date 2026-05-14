@@ -46,8 +46,8 @@ Grouping:
     unmatched GT points (occluded, off-frame, false-negatives in the v8
     mask) silently dropped.
 
-Output: data/number_classifier/round2/<class>/<frame_id>_<side>.png
-        + data/number_classifier/round2/manifest.json (provenance).
+Output: data/training/crop_classifier/round2/<class>/<frame_id>_<side>.png
+        + data/training/crop_classifier/round2/manifest.json (provenance).
 """
 from __future__ import annotations
 
@@ -284,11 +284,11 @@ def process_frame(frame_id: str, masks: np.ndarray, H: np.ndarray,
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest-file", default=os.path.join(
-        PROJECT_ROOT, "data/h_pool_and_intrinsics.json"))
+        PROJECT_ROOT, "data/manifests/h_pool_and_intrinsics.json"))
     ap.add_argument("--cache-dir", default=os.path.join(
         PROJECT_ROOT, "data/dense_regression/cache"))
     ap.add_argument("--out-dir", default=os.path.join(
-        PROJECT_ROOT, "data/number_classifier/round3"))
+        PROJECT_ROOT, "data/training/crop_classifier/round3"))
     ap.add_argument("--max-entries", type=int, default=None,
                      help="Optional cap for smoke-testing.")
     ap.add_argument("--image-h", type=int, default=720)

@@ -20,7 +20,7 @@ on a coach, no number-mask on a sideline ref, etc.) without needing H itself.
 Usage:
     python scripts/data_prep/build_qc_unified_mask_dataset.py \\
         --pool-dir output/dense_field_pool \\
-        --out-dir data/unified_masks/round2_qc \\
+        --out-dir data/training/unified_masks/round2_qc \\
         --device mps
 """
 import argparse
@@ -116,7 +116,7 @@ def main():
                          "directly. If set, --pool-dir's decisions.json filter "
                          "is bypassed (assumes manifest is already filtered).")
     ap.add_argument("--clips-root", default=os.path.join(PROJECT_ROOT, "videos/clips"))
-    ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "data/unified_masks/round2_qc"))
+    ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "data/training/unified_masks/round2_qc"))
     ap.add_argument("--device", default="mps")
     ap.add_argument("--max-entries", type=int, default=None,
                     help="For debug: stop after this many entries.")

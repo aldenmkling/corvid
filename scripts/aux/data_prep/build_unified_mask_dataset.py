@@ -142,7 +142,7 @@ def extract_and_label(clip_path, frame_indices, device):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--clips-root", default=os.path.join(PROJECT_ROOT, "videos/clips"))
-    ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "data/unified_masks/round1"))
+    ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "data/training/unified_masks/round1"))
     ap.add_argument("--frames-per-game", type=int, default=250)
     ap.add_argument("--clips-per-game", type=int, default=50,
                     help="Number of distinct clips to sample from per game.")

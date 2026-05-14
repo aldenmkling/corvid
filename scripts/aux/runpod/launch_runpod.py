@@ -851,14 +851,14 @@ def main():
     # Set defaults based on training type
     if args.training_type == "hrnet":
         if args.dataset is None:
-            args.dataset = os.path.join(PROJECT_ROOT, "data", "field_keypoints")
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "labels", "field_keypoints")
         if args.epochs is None:
             args.epochs = 100
         if args.batch_size is None:
             args.batch_size = 16
     elif args.training_type == "unet":
         if args.dataset is None:
-            args.dataset = os.path.join(PROJECT_ROOT, "data", "line_detection")
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "labels", "line_masks")
         if args.epochs is None:
             args.epochs = 100
         if args.batch_size is None:
@@ -897,7 +897,7 @@ def main():
             args.lr = 5e-4
     elif args.training_type == "number-classifier":
         if args.dataset is None:
-            args.dataset = os.path.join(PROJECT_ROOT, "data", "number_classifier", "round1")
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "training", "crop_classifier", "round1")
         if args.epochs is None:
             args.epochs = 60
         if args.batch_size is None:
@@ -907,7 +907,7 @@ def main():
         # default lr is 1e-3 — leave as-is
     else:
         if args.dataset is None:
-            args.dataset = os.path.join(PROJECT_ROOT, "data", "player_detection")
+            args.dataset = os.path.join(PROJECT_ROOT, "data", "training", "player_detection_coco")
         if args.epochs is None:
             args.epochs = 50
         if args.batch_size is None:

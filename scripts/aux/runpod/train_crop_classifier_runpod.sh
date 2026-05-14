@@ -22,7 +22,7 @@ tar -czf "$TAR" \
     src/field_mapping/classes.py \
     scripts/aux/training/train_crop_classifier.py \
     scripts/aux/runpod/requirements_farm_runpod.txt \
-    data/number_classifier/round3_128x32
+    data/training/crop_classifier/round3_128x32
 
 echo "=== uploading ($(du -sh $TAR | cut -f1)) ==="
 $SCP "$TAR" "$TARGET:/workspace/payload.tar.gz"

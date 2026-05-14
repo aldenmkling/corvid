@@ -155,7 +155,7 @@ def _process_simple_channel(prob_map: np.ndarray, type_idx: int,
 # ─────────────────────────────────────────────────────────────────────────────
 # Crop construction — matches the input format the number classifier was
 # trained on: 64×64 grayscale (binary 0/255), pad to square then resize
-# NEAREST so the digit shape is preserved. See data/number_classifier/round1.
+# NEAREST so the digit shape is preserved. See data/training/crop_classifier/round1.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Painted-yardline number crops are wider than tall (median 134x33 px).

@@ -1,6 +1,6 @@
 """Random-sample y/n inspection of farmed pseudo-labels.
 
-Picks N (clip, frame) pairs at random across data/pseudo_labels/*.npz,
+Picks N (clip, frame) pairs at random across data/training/pseudo_labels/*.npz,
 shows source + rectified view side-by-side with field grid + projected
 tokens overlaid. You press:
   y  → accept (label looks correct)
@@ -8,7 +8,7 @@ tokens overlaid. You press:
   s  → skip (unclear, exclude from count)
   q  → quit early
 
-Saves per-sample decisions to data/pseudo_labels_qc.json with summary
+Saves per-sample decisions to data/manifests/pseudo_labels_qc.json with summary
 stats. Aborts training-readiness if accept rate < threshold.
 
 Usage:
@@ -127,11 +127,11 @@ def npz_to_clip_path(npz_name):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--npz-dir", default="data/pseudo_labels")
+    ap.add_argument("--npz-dir", default="data/training/pseudo_labels")
     ap.add_argument("--manifest",
-                   default="data/h_pool_and_intrinsics.json",
+                   default="data/manifests/h_pool_and_intrinsics.json",
                    help="for per-clip K/dist (H is in undistorted-pixel space)")
-    ap.add_argument("--out", default="data/pseudo_labels_qc.json")
+    ap.add_argument("--out", default="data/manifests/pseudo_labels_qc.json")
     ap.add_argument("--n", type=int, default=50,
                    help="how many frames to inspect")
     ap.add_argument("--seed", type=int, default=42)

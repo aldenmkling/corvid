@@ -692,7 +692,7 @@ def main():
     print(f"  sweep center: frame {SWEEP_FRAME_CENTER}\n")
 
     manifest = json.load(open(os.path.join(
-        PROJECT_ROOT, "data/h_pool_and_intrinsics.json")))
+        PROJECT_ROOT, "data/manifests/h_pool_and_intrinsics.json")))
 
     # ── Run our pipeline ─────────────────────────────────────────────────────
     cutoff, dot_field, track_meta = run_pipeline(clip_path, device, manifest)

@@ -2,7 +2,7 @@
 
 Trains TokenClassifyV10 end-to-end with GT number anchors injected in
 place of the (not-yet-trained) RFB, on the ~320K pseudo-labeled frames
-in data/pseudo_labels/*.npz.
+in data/training/pseudo_labels/*.npz.
 
 The pseudo-label npz already contains pre-tokenized data + labels:
   tokens     (n_frames, n_tok_per_frame, 16)   geometry
@@ -245,7 +245,7 @@ def evaluate(model, loader, device):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--npz-dir", default="data/pseudo_labels")
+    ap.add_argument("--npz-dir", default="data/training/pseudo_labels")
     ap.add_argument("--out-dir", default="models/token_only_v10_phase1_pseudo")
     ap.add_argument("--val-games", nargs="+", default=["2024090802"],
                    help="Games whose clips go to the validation set.")

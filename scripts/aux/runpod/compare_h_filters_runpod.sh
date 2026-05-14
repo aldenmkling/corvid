@@ -37,7 +37,7 @@ tar -czf "$TAR" \
     videos/clips/2019102712/play_118/sideline.mp4 \
     videos/clips/2024090801/play_032/sideline.mp4 \
     videos/clips/2024091501/play_001/sideline.mp4 \
-    data/h_pool_and_intrinsics.json
+    data/manifests/h_pool_and_intrinsics.json
 
 echo "=== uploading ($(du -sh $TAR | cut -f1)) ==="
 $SCP "$TAR" "$TARGET:/workspace/payload.tar.gz"

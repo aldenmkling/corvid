@@ -25,7 +25,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default=os.path.join(
-        PROJECT_ROOT, "data/h_pool_and_intrinsics.json"))
+        PROJECT_ROOT, "data/manifests/h_pool_and_intrinsics.json"))
     ap.add_argument("--stage-dir", default=os.path.join(
         PROJECT_ROOT, "output/dense_field_pool/stage"))
     ap.add_argument("--dry-run", action="store_true")

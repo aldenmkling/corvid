@@ -209,8 +209,8 @@ def evaluate(encoder, rfb, v10c, loader, device, d_enc):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--npz-dir", default="data/pseudo_labels")
-    ap.add_argument("--crops-dir", default="data/pseudo_labels_crops")
+    ap.add_argument("--npz-dir", default="data/training/pseudo_labels")
+    ap.add_argument("--crops-dir", default="data/training/pseudo_labels_crops")
     ap.add_argument("--encoder-ckpt",
                    default="models/token_only_v10_phase1_pseudo/best.pth")
     ap.add_argument("--rfb-ckpt",

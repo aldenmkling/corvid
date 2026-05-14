@@ -342,8 +342,8 @@ def main():
     ap.add_argument("--clip", action="append", required=True,
                        help="path(s) to clip mp4 (repeatable)")
     ap.add_argument("--clips-dir", default="videos/clips")
-    ap.add_argument("--manifest", default="data/h_pool_and_intrinsics.json")
-    ap.add_argument("--out-dir", default="data/pseudo_labels")
+    ap.add_argument("--manifest", default="data/manifests/h_pool_and_intrinsics.json")
+    ap.add_argument("--out-dir", default="data/training/pseudo_labels")
     ap.add_argument("--stage1-ckpt", default="models/token_only_v10_stage1_v3unew_gt/best.pth")
     ap.add_argument("--rfb-ckpt", default="models/rf_b_v3unew_gt/best.pth")
     ap.add_argument("--crop-ckpt", default="models/dsresnet10ww_round3_128x32/best.pth")

@@ -328,7 +328,7 @@ def main():
     ]
 
     manifest = json.load(open(os.path.join(
-        PROJECT_ROOT, "data/h_pool_and_intrinsics.json")))
+        PROJECT_ROOT, "data/manifests/h_pool_and_intrinsics.json")))
 
     print(f"Loading classifier pipeline (device={args.device}) ...")
     pipe = NewPipeline(device)

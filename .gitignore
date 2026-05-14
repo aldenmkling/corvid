@@ -9,61 +9,68 @@
 __pycache__/
 *.pyc
 
-# Data (large video/clip files)
-data/
+# Data: default to ignored, carve out small text/label files.
+data/*
+!data/README.md
+!data/manifests/
+!data/ngs/
+!data/labels/
+!data/training/
+
+# Manifests + NGS ground truth are fully tracked.
+!data/manifests/*
+!data/ngs/*
+
+# Hand-labeled label files we keep (label JSONs / YOLO txts / config XMLs).
+!data/labels/player_detection/
+!data/labels/player_detection/export_final/
+!data/labels/player_detection/export_final/labels/
+!data/labels/player_detection/export_final/classes.txt
+!data/labels/player_detection/labels/
+!data/labels/field_keypoints/
+!data/labels/field_keypoints/labeling_config.xml
+!data/labels/field_keypoints/field_keypoints_hand_labeled.json
+!data/labels/field_keypoints/al_round*/
+!data/labels/field_keypoints/al_round*/*.json
+!data/labels/line_masks/manifest.json
+
+# Bulk image folders under labels/ — large, regeneratable, ignored.
+data/labels/player_detection/images/
+data/labels/view_classifier/
+data/labels/field_keypoints/synthetic/
+data/labels/field_keypoints/annotation_images/
+data/labels/field_keypoints/train/
+data/labels/field_keypoints/valid/
+data/labels/field_keypoints/al_round*/candidates/
+data/labels/field_keypoints/al_round*/images/
+data/labels/line_masks/
+
+# All generated training datasets — regeneratable, ignored.
+data/training/
+
+# Videos
 videos/
 *.mp4
-# But track the directory structure (not the video/clip files themselves)
 !videos/
 !videos/games/
 !videos/clips/
 
-# Model weights (large binary files)
+# Model weights
 *.pt
-models/
+*.pth
+models/*
+!models/README.md
 
-# But do track annotations (small text files, hard to recreate)
-!data/
-!data/annotations/
-!data/annotations/export_final/
-!data/annotations/export_final/labels/
-!data/annotations/export_final/classes.txt
-!data/annotations/labels/
-!data/field_keypoints/
-!data/field_keypoints/labeling_config.xml
-
-# Training data (large binary files, regeneratable)
-data/annotations/images/
-data/view_classifier/
-data/player_detection/
-data/field_keypoints/synthetic/
-data/field_keypoints/annotation_images/
-data/field_keypoints/train/
-data/field_keypoints/valid/
-# AL rounds: track label JSONs + manifests, ignore the bulk JPEG folders
-data/field_keypoints/al_round*/candidates/
-data/field_keypoints/al_round*/images/
-# Line-detection dataset (regeneratable from self_sup_pool_10k + review JSON)
-data/line_detection/
-data/line_detection_build.log
-# Hash-only keypoint split (regeneratable from data/field_keypoints)
-data/field_keypoints_hash_only/
-# Hash mask round 3 (regeneratable from data/field_keypoints + line UNet)
-data/hash_masks/
-# Painted-number classifier crops (auto-mined from rectify pipeline)
-data/number_classifier/
-# Pseudo-labeled training pool (regeneratable via farm_pseudo_labels.py)
-data/pseudo_labels/
-data/pseudo_labels_crops/
-# Unified mask training data (regeneratable via build_unified_mask_dataset.py)
-data/unified_masks/
-
-# Output (generated images, tracking results)
-output/
-# Track only the small NGS-comparison artifacts; ignore the big mp4s.
+# Output: track only NGS comparison CSV/TXT.
+output/*
 !output/ngs_compare/
+output/ngs_compare/*
 !output/ngs_compare/*.csv
 !output/ngs_compare/*.txt
+
+# Build/scratch
+*.tar
+*.log
 
 # macOS
 .DS_Store

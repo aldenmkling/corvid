@@ -10,7 +10,7 @@ Usage modes:
 2. **Build a final TRAINING manifest from Y'd entries** (after all Y/N is done):
        python scripts/data_prep/build_smart_pool.py \\
            --strata 0 1 2 3 4 --y-only --target-per-stratum 500 \\
-           --out data/h_pool_and_intrinsics.json
+           --out data/manifests/h_pool_and_intrinsics.json
 
 In both modes, sampling within each stratum maximizes clip diversity:
   - First round: pick 1 entry per distinct clip

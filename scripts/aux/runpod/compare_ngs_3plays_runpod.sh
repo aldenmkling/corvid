@@ -41,7 +41,7 @@ tar -czf "$TAR" \
     videos/clips/2019102712/play_011/sideline.mp4 \
     videos/clips/2019102712/play_046/sideline.mp4 \
     videos/clips/2019102712/play_118/sideline.mp4 \
-    data/h_pool_and_intrinsics.json \
+    data/manifests/h_pool_and_intrinsics.json \
     data/ngs/2019_GB_2019102712_282.tsv \
     data/ngs/2019_KC_2019102712_1205.tsv \
     data/ngs/2019_GB_2019102712_3067.tsv

@@ -320,30 +320,34 @@ scripts/aux/
 ```
 
 ### Data
-- `data/h_pool_and_intrinsics.json` — combined: (1) hand-verified
-  2500-sample H training pool (`entries`), (2) per-clip camera
-  intrinsics for 1344 clips (`intrinsics_by_clip`). Every active script
-  loads this for `K + dist` lookups.
-- `data/annotations/` — RF-DETR player labels (git-tracked, small).
-- `data/player_detection/` — RF-DETR COCO dataset (gitignored).
-- `data/field_keypoints/` — hand-labeled keypoint annotations
-  (892 frames). Hand-labeled, irreplaceable.
-- `data/line_detection/{train,valid,al_round3}/` — hand-labeled line
-  annotations. Irreplaceable.
-- `data/unified_masks/` — unified UNet training data (gitignored,
-  regeneratable via `build_unified_mask_dataset.py`).
-- `data/pseudo_labels/`, `data/pseudo_labels_crops/` — phase 1/2/3
-  training data (gitignored, regeneratable via `farm_pseudo_labels.py`).
-- `data/number_classifier/round1/` — number crop classifier training
-  data (gitignored, regeneratable).
-- `data/view_classifier/` — sideline/endzone classifier data.
-- `data/ngs/2019_KC_2019092204_1643.tsv` — NGS TSV for play_065
-  (validation ground truth).
-- `data/phase1_blacklist.json`, `data/phase1_failures*.json`,
-  `data/hard_train_samples.json`, `data/pseudo_labels_qc.json` — phase
-  1/2/3 training metadata (blacklists, QC decisions, hard examples).
-- `data/hash_excluded_frames.txt` — list of bad-GT hash frames to skip
-  during dataset rebuilds (human-curated, hand-maintained).
+Grouped under `data/manifests/`, `data/ngs/`, `data/labels/`,
+`data/training/`. See `data/README.md` for the full inventory.
+
+- `data/manifests/h_pool_and_intrinsics.json` — combined: (1) hand-verified
+  2500-sample H training pool (`entries`), (2) per-clip camera intrinsics
+  for 1344 clips (`intrinsics_by_clip`). Every active script loads this
+  for `K + dist` lookups.
+- `data/manifests/{phase1_blacklist,phase1_failures,phase1_failures_qc,
+  hard_train_samples,pseudo_labels_qc}.json` — phase 1/2/3 training
+  metadata.
+- `data/manifests/hash_excluded_frames.txt` — bad-GT hash frames to skip
+  during dataset rebuilds.
+- `data/ngs/*.tsv` — NGS TSVs for the 4 validation plays.
+- `data/labels/player_detection/` — RF-DETR player labels (git-tracked,
+  small).
+- `data/labels/field_keypoints/` — hand-labeled keypoints (892 frames).
+- `data/labels/line_masks/{train,valid,al_round3}/` — hand-labeled line
+  annotations.
+- `data/labels/view_classifier/` — sideline/endzone classifier data.
+- `data/training/player_detection_coco/` — RF-DETR COCO dataset
+  (gitignored).
+- `data/training/unified_masks/` — 4-channel UNet training set
+  (gitignored, regeneratable via `build_unified_mask_dataset.py`).
+- `data/training/pseudo_labels/`, `data/training/pseudo_labels_crops/` —
+  phase 1/2/3 training data (gitignored, regeneratable via
+  `farm_pseudo_labels.py`).
+- `data/training/crop_classifier/round3_128x32/` — number crop classifier
+  training data (gitignored, regeneratable).
 
 ### Models (all in `models/`, 8 production)
 - `unet_unified_v8_yardside_recover/best.pth` — 4-ch UNet (yard / side /
@@ -359,8 +363,8 @@ scripts/aux/
 ### Output
 - `output/4panel_viz/*.mp4` — 4-panel comparison viz per clip
   (source + tracker + rectified + dots).
-- `output/ngs_compare/{play_065_compare.mp4, play_065_per_player.csv,
-  play_065_summary.txt}` — NGS validation outputs.
+- `output/ngs_compare/<game>_<play>_{compare.mp4,per_player.csv,summary.txt}`
+  — NGS validation outputs (one set per validation play).
 
 ## Critical Rules
 - **NEVER launch RunPod / training / pipeline / Label Studio scripts
@@ -374,7 +378,7 @@ scripts/aux/
 - **`data/` and `models/` are gitignored.** Deleting from them is
   permanent — no git history to resurrect from. Always check with the
   user before deletion.
-- **Hand-labeled data is irreplaceable** — `data/field_keypoints/`,
-  `data/line_detection/`, `data/annotations/`, and the 2500 verified
-  entries in `data/h_pool_and_intrinsics.json` represent work that
-  can't be regenerated.
+- **Hand-labeled data is irreplaceable** — `data/labels/field_keypoints/`,
+  `data/labels/line_masks/`, `data/labels/player_detection/`, and the
+  2500 verified entries in `data/manifests/h_pool_and_intrinsics.json`
+  represent work that can't be regenerated.

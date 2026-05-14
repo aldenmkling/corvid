@@ -1,5 +1,5 @@
 """Train the number-crop classifier (DSResNet10ww) on
-data/number_classifier/round3_128x32.
+data/training/crop_classifier/round3_128x32.
 
 Self-contained: imports the model class from src/pipeline/crop_classifier.py
 and the constants from src/pipeline/number_classifier_constants.py.
@@ -108,7 +108,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="mps")
     ap.add_argument("--dataset", default=os.path.join(
-        PROJECT_ROOT, "data", "number_classifier", "round3_128x32"))
+        PROJECT_ROOT, "data", "training", "crop_classifier", "round3_128x32"))
     ap.add_argument("--output", default=os.path.join(
         PROJECT_ROOT, "models", "dsresnet10ww_round3_128x32"))
     ap.add_argument("--epochs", type=int, default=80)

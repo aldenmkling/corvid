@@ -494,7 +494,7 @@ def run_segmentation(args):
     model_path = args.model
     if not os.path.exists(model_path):
         print(f"ERROR: View classifier model not found: {model_path}")
-        print("Train with: data/view_classifier/ training data")
+        print("Train with: data/labels/view_classifier/ training data")
         sys.exit(1)
 
     print(f"Processing: {os.path.basename(video_path)}")

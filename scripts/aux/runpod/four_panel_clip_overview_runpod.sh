@@ -32,7 +32,7 @@ tar -czf "$TAR" \
     models/dsresnet10ww_round3_128x32/best.pth \
     models/rfdetr_best_ema.pth \
     videos/clips/2019092204/play_065/sideline.mp4 \
-    data/h_pool_and_intrinsics.json
+    data/manifests/h_pool_and_intrinsics.json
 
 echo "=== uploading ($(du -sh $TAR | cut -f1)) ==="
 $SCP "$TAR" "$TARGET:/workspace/payload.tar.gz"

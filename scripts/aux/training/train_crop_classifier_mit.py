@@ -10,7 +10,7 @@ Each label encodes a specific NGS x position:
   10L=20  20L=30  30L=40  40L=50  50=60  40R=70  30R=80  20R=90  10R=100
 
 Training data layout (ImageFolder-style):
-  data/number_classifier/round1/<class>/<filename>.png
+  data/training/crop_classifier/round1/<class>/<filename>.png
 
 Loss: class-weighted cross-entropy (inverse frequency) + label smoothing 0.1
       (absorbs ~5–10% expected label noise from auto-mining).

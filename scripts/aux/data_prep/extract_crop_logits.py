@@ -6,7 +6,7 @@ For each pseudo_labels/<clip>.npz:
   2. Read frames at d["frame_idx"][k]
   3. Undistort + run UNet + tokenize (cc_tokenizer_v3 with return_aux=True)
   4. Run crop classifier on aux["num_crops"]
-  5. Save sidecar to data/pseudo_labels_crops/<clip>.npz:
+  5. Save sidecar to data/training/pseudo_labels_crops/<clip>.npz:
        frame_idx        (n_frames,)            (matches the source npz)
        num_token_idx    object array (n_frames,) → per-frame indices of
                                                  num tokens in the source
@@ -184,10 +184,10 @@ def process_clip(npz_path, out_path, unet, crop_fn, intr_by_clip, device,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--npz-dir", default="data/pseudo_labels")
-    ap.add_argument("--out-dir", default="data/pseudo_labels_crops")
+    ap.add_argument("--npz-dir", default="data/training/pseudo_labels")
+    ap.add_argument("--out-dir", default="data/training/pseudo_labels_crops")
     ap.add_argument("--manifest",
-                   default="data/h_pool_and_intrinsics.json")
+                   default="data/manifests/h_pool_and_intrinsics.json")
     ap.add_argument("--unified-weights",
                    default="models/unet_unified_v8_yardside_recover/best.pth")
     ap.add_argument("--crop-ckpt",

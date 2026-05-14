@@ -7,7 +7,7 @@ Architecture:
   - Loss: per-channel BCE + Dice (sum)
 
 Training data:
-  - Pseudo-labels from data/unified_masks/round1/raw/<id>.npz
+  - Pseudo-labels from data/training/unified_masks/round1/raw/<id>.npz
   - decisions.json filters to user-Y'd entries
   - Train/val split by game (no leak)
 
@@ -18,7 +18,7 @@ Validation:
 
 Usage:
     python scripts/training/train_unified_mask.py \\
-        --pool-dir data/unified_masks/round1 \\
+        --pool-dir data/training/unified_masks/round1 \\
         --out-dir models/unet_unified_v1 \\
         --device cuda --epochs 50
 """
@@ -275,7 +275,7 @@ def split_by_game(entries, val_game=None, val_frac=0.1, seed=42):
 # ── Main ──
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pool-dir", default=os.path.join(PROJECT_ROOT, "data/unified_masks/round1"))
+    ap.add_argument("--pool-dir", default=os.path.join(PROJECT_ROOT, "data/training/unified_masks/round1"))
     ap.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "models/unet_unified_v1"))
     ap.add_argument("--encoder", default="mit_b0",
                     choices=["mit_b0", "mit_b1", "mit_b2"])

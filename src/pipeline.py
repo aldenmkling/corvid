@@ -252,9 +252,9 @@ def write_csv(result: dict, out_path: str):
 
 
 def _load_intrinsics(clip_path: str) -> tuple[np.ndarray, np.ndarray]:
-    """Look up K + dist from data/h_pool_and_intrinsics.json. Returns
+    """Look up K + dist from data/manifests/h_pool_and_intrinsics.json. Returns
     (K=I, dist=0) fallback if the clip isn't in the manifest."""
-    manifest_path = os.path.join(PROJECT_ROOT, "data", "h_pool_and_intrinsics.json")
+    manifest_path = os.path.join(PROJECT_ROOT, "data", "manifests", "h_pool_and_intrinsics.json")
     if not os.path.exists(manifest_path):
         return np.eye(3, dtype=np.float64), np.zeros(5, dtype=np.float64)
     rel = os.path.relpath(clip_path, os.path.join(PROJECT_ROOT, "videos/clips"))

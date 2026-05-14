@@ -3,7 +3,7 @@
 Inputs (per number token):
   encoder_features  — from frozen phase-1 encoder
   crop_logits       — from frozen crop classifier (pre-extracted into
-                       data/pseudo_labels_crops/<clip>.npz)
+                       data/training/pseudo_labels_crops/<clip>.npz)
 Targets:
   painted_class (9-class, mapped from NGS_x via PAINTED_TO_21)
   row (near/far, 0/1)
@@ -167,8 +167,8 @@ def evaluate(encoder, rfb, loader, device):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--npz-dir", default="data/pseudo_labels")
-    ap.add_argument("--crops-dir", default="data/pseudo_labels_crops")
+    ap.add_argument("--npz-dir", default="data/training/pseudo_labels")
+    ap.add_argument("--crops-dir", default="data/training/pseudo_labels_crops")
     ap.add_argument("--encoder-ckpt",
                    default="models/token_only_v10_phase1_pseudo/best.pth")
     ap.add_argument("--out-dir", default="models/rf_b_phase2_pseudo")

@@ -19,9 +19,9 @@ import subprocess
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", default="data/h_pool_and_intrinsics.json")
+    ap.add_argument("--manifest", default="data/manifests/h_pool_and_intrinsics.json")
     ap.add_argument("--clips-dir", default="videos/clips")
-    ap.add_argument("--out-dir", default="data/pseudo_labels")
+    ap.add_argument("--out-dir", default="data/training/pseudo_labels")
     ap.add_argument("--device", default="mps")
     ap.add_argument("--game-filter", default=None,
                        help="if given, only process clips whose path "

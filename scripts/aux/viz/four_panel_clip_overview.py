@@ -349,7 +349,7 @@ def main():
     device = torch.device(args.device)
 
     manifest = json.load(open(os.path.join(
-        PROJECT_ROOT, "data/h_pool_and_intrinsics.json")))
+        PROJECT_ROOT, "data/manifests/h_pool_and_intrinsics.json")))
     rel = rel_clip
     intr = manifest["intrinsics_by_clip"].get(rel, {})
     K = np.asarray(intr.get("K", np.eye(3).tolist()), dtype=np.float64)
