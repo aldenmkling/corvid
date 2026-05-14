@@ -69,31 +69,29 @@ RF-DETR-Large fine-tuned on 967 hand-annotated frames across 8 games
 - Detection threshold: **0.3** — handle noise downstream in the tracker,
   not by raising the threshold.
 
-### 3. Field mapping / homography — DONE (unified UNet + v10c token classifier)
-Replaced the older 3-specialist (line + hash + number) UNet path. Current
-production:
+### 3. Field mapping / homography — DONE (unified UNet + 3-phase token classifier)
+Replaced the older 3-specialist (line + hash + number) UNet path. Lives
+entirely in `src/field_mapping/`. Current production:
 - **One 4-channel UNet** (`models/unet_unified_v8_yardside_recover/best.pth`)
   emits per-pixel scores for yard / side / hash / number masks.
-- **Tokenizer** (`src/pipeline/cc_tokenizer_v3.py`) converts the mask into
+- **Tokenizer** (`src/field_mapping/tokenizer.py`) converts the mask into
   per-region tokens.
 - **Three-phase token classifier:**
-  - **Phase 1** — encoder (`src/pipeline/model_token_v10.py`,
-    weights `models/token_only_v10_phase1_pseudo/best.pth`) attends across
-    all tokens.
-  - **Phase 2** — Refinement for Number tokens (`src/pipeline/train_rf_b.py`,
-    weights `models/rf_b_phase2_pseudo/best.pth`) takes the encoder feature
-    plus the number crop classifier's logits
-    (`models/dsresnet10ww_round3_128x32/best.pth`) and predicts each number's
-    NGS-x class.
-  - **Phase 3** — Cross-attention head (`src/pipeline/model_token_v10b.py`
-    used by `train_token_v10c_stage2`, weights
-    `models/v10c_phase3_pseudo/best.pth`) refines every token using the
-    Phase-2-resolved number anchors and yields each token's NGS-x label
-    (yardlines, hashes, sidelines) at 99.66% val accuracy.
-- **Keypoint extraction** (`src/homography/keypoints_from_tokens.py`)
-  emits image↔NGS correspondences from the labeled tokens, including
-  number-edge tangents and hash×yardline crossings.
-- **Per-frame H solver** (`src/homography/h_tracker.py::HomographyTrackerLite`)
+  - **Phase 1: TokenEncoder** (`src/field_mapping/encoder.py`, weights
+    `models/token_only_v10_phase1_pseudo/best.pth`) — 4-layer transformer
+    encoder, attends across all tokens to build contextual features.
+  - **Phase 2: NumberRefiner** (`src/field_mapping/number_refiner.py`,
+    weights `models/rf_b_phase2_pseudo/best.pth`) — takes the encoder
+    features for number tokens + per-crop logits from the CropClassifier
+    (`models/dsresnet10ww_round3_128x32/best.pth`) and refines each
+    number token's NGS-x label.
+  - **Phase 3: TokenLabeler** (`src/field_mapping/token_labeler.py`,
+    weights `models/v10c_phase3_pseudo/best.pth`) — cross-attention head;
+    uses phase-2-resolved number anchors to label every token's NGS-x.
+    99.66% val accuracy.
+- **Keypoint extraction** (`src/field_mapping/keypoints.py`) emits
+  image↔NGS correspondences from the labeled tokens.
+- **Per-frame H solver** (`src/field_mapping/homography.py::HomographyTrackerLite`)
   fits H per frame with full/delta/carry fallback + bank validation.
 - **LOO filter + polynomial bridge** (added 2026-05-13;
   `loo_filter_and_replace` in `h_tracker.py`): each frame's raw H is
@@ -110,7 +108,7 @@ production:
 - **Sav-Gol smoothing** (window=7, poly=2) on the cleaned H trajectory.
 
 ### 4. Player tracking — DONE (custom field-coord Kalman)
-`src/tracker.py::PlayerTracker`. Tracks in NGS yards (not pixels), so
+`src/player_tracking/tracker.py::PlayerTracker`. Tracks in NGS yards (not pixels), so
 camera motion is solved upstream by H. Per-track Kalman state
 `[x, y, vx, vy]` with constant-velocity dynamics, dt=1/30 s.
 
@@ -125,25 +123,30 @@ relaxed), then graveyard re-association on orphans:
   box-overlap windows. Falls back to 2-cue when track has < 3
   observations.
 
-Post-tracking team classification via `src/team_classifier.py::classify_teams_color_pca`
-— per-track HSV signature, baseline-subtract, PCA → PC1, median-split.
+Post-tracking team classification via
+`src/player_tracking/team_classifier.py::classify_teams_color_pca` —
+per-track HSV signature, baseline-subtract, PCA → PC1, median-split.
 Forces 11/11 by construction (NFL formation prior).
 
-### 5. NGS validation — DONE on play_065
-`scripts/aux/compare/compare_ngs_play_065.py` runs the pipeline +
+### 5. NGS validation — DONE on all 4 in-scope plays
+`scripts/aux/compare/compare_ngs.py` runs the pipeline +
 loads the NGS TSV + sweeps a snap-frame offset (NGS `ball_snap` event
 marks t=0, our clip starts ~120 frames before snap) + Hungarian
 position-only match (22 NGS × N tracks) + scores position / speed /
 accel.
 
-play_065 result (2026-05-14):
-- Best snap offset: frame 114 (= 3.80 s into clip; user estimated ~4 s)
-- All 22 NGS players matched
-- **Position RMSE median: 0.437 yd** (mean 0.884 — a couple outliers)
-- **Speed RMSE: 0.890 yd/s, correlation 0.91**
-- Accel correlation: 0.26 (noisy, as expected for second derivatives
-  without stronger position smoothing)
-- Outputs at `output/ngs_compare/`.
+All 4 in-scope plays (2026-05-14):
+
+| Clip | Snap (frames / s) | Pos RMSE med/mean (yd) | Speed corr (med) |
+|---|---|---|---|
+| 2019092204/play_065 | 114 / 3.80 | 0.437 / 0.884 | 0.907 |
+| 2019102712/play_011 | 303 / 10.10 | 0.422 / 0.713 | 0.914 |
+| 2019102712/play_046 | 120 / 4.00 | 0.472 / 0.619 | 0.904 |
+| 2019102712/play_118 | 108 / 3.60 | 0.765 / 0.963 | 0.743 |
+
+3/4 plays hit the sub-yard position median target. Accel correlation is
+poor across the board (0.18-0.26) — needs stronger position smoothing
+before differentiating twice. Outputs at `output/ngs_compare/`.
 
 ### 6. Jersey number detection — NOT STARTED
 Per-player ID at the snap so tracker output can be tagged with player
@@ -183,19 +186,25 @@ NGS-labeled plays (`project_ngs_validation_clips.md`):
 **Done:**
 1. Clip segmentation (~1650 plays).
 2. Player detection (RF-DETR, F1=0.981).
-3. Homography (unified UNet + v10c, auto-anchor, LOO red-flag filter).
+3. Homography (unified UNet + 3-phase token classifier, auto-anchor,
+   LOO red-flag filter).
 4. Player tracking (custom field-coord Kalman, multi-cue association).
 5. Team classification (color PCA + median split, 11/11 forced).
-6. NGS validation on play_065 (sub-yard position, 0.91 speed correlation).
+6. NGS validation on all 4 in-scope plays (sub-yard position on 3/4,
+   0.74–0.91 speed correlation).
+7. Major refactor (2026-05-14): src/ reorganized into clearly-named
+   pipeline modules (`field_mapping/`, `player_detection/`,
+   `player_tracking/`); each file named for its pipeline role. New
+   `src/pipeline.py` end-to-end orchestrator.
 
 **Next:**
-1. **Run NGS validation on the other 3 in-scope plays** (2019102712/p011,
-   p046, p118). Confirm position + speed metrics generalize.
-2. **Trajectory smoothing pass** before differentiating, to recover
+1. **Trajectory smoothing pass** before differentiating, to recover
    useful accel correlations.
-3. **Batch-process the remaining ~1650 clips** — straightforward once
+2. **Batch-process the remaining ~1650 clips** — straightforward once
    validation cleared. Need a runner that captures per-clip quality
    flags + writes per-play tracking CSVs.
+3. **Retrain crop classifier on the larger phase-2 pseudo-label set**
+   (per `project_future_improvements.md`).
 4. **Jersey number detection** at snap → labeled trajectories.
 5. **Two-camera fusion** (sideline + endzone).
 
@@ -211,78 +220,104 @@ NGS-labeled plays (`project_ngs_validation_clips.md`):
 
 ## Commands
 
-End-to-end production pipeline today is invoked by aux scripts:
+End-to-end production pipeline:
 
-- **Single-clip 4-panel viz** (source+corrs / tracker boxes /
-  rectified / tracking dots, team-colored): `bash
-  scripts/aux/runpod/play_065_4panel_runpod.sh` (RunPod). Locally:
-  `python scripts/aux/viz/make_play_065_4panel.py --device mps`.
-- **NGS comparison**: `bash scripts/aux/runpod/compare_ngs_play_065_runpod.sh`.
-- **Filter diagnostics** (LOO vs old): `bash
-  scripts/aux/runpod/diagnose_h_filters_runpod.sh`.
-- **Homography-only on a single clip** (legacy 3-specialist path, still
-  works): `python -m src.homography.rectify --clip <path> --out <path>`.
-- **RunPod training** (active types): `python
+- **Full pipeline → tracking CSV**: `python -m src.pipeline --clip
+  videos/clips/<game>/<play>/sideline.mp4 --out <output.csv>
+  --device cuda|mps|cpu`. Loads all 5 stages, runs the clip, emits
+  per-frame per-track NGS-yard CSV (frame_idx, track_id, x_yd, y_yd,
+  team, in_bad_run).
+
+Aux entry points:
+
+- **4-panel clip overview viz**: `bash
+  scripts/aux/runpod/four_panel_clip_overview_runpod.sh`. Locally:
+  `python scripts/aux/viz/four_panel_clip_overview.py --device mps`.
+- **NGS comparison** (single clip): `bash
+  scripts/aux/runpod/compare_ngs_runpod.sh`. Configurable via the
+  script's `--clip`, `--ngs-tsv`, `--snap-center` args.
+- **3-clip NGS comparison batch**: `bash
+  scripts/aux/runpod/compare_ngs_3plays_runpod.sh`.
+- **LOO filter diagnostics**: `bash
+  scripts/aux/runpod/h_residual_report_runpod.sh` (single clip)
+  or `bash scripts/aux/runpod/compare_h_filters_runpod.sh` (old vs new
+  filter across multiple clips).
+- **Train crop classifier**: `bash
+  scripts/aux/runpod/train_crop_classifier_runpod.sh`.
+- **RunPod training (other models)**: `python
   scripts/aux/runpod/launch_runpod.py --training-type
-  {rfdetr,number-classifier}`. The `unet-unified` and phase{1,2,3}_pseudo
-  trainers run via their own scripts in `scripts/aux/training/` (not
-  wired into launch_runpod.py).
+  {rfdetr,number-classifier}`. The token-encoder / number-refiner /
+  token-labeler / UNet trainers run via their own scripts in
+  `scripts/aux/training/` (not wired into launch_runpod.py).
 
 ## File Structure
 
-**Production code lives in `src/` and is fully importable.** `scripts/aux/`
-contains every entry-point / utility / runpod launcher we still use.
+**Production code lives in `src/` and is fully importable.** Every file
+is named for its role in the pipeline. `scripts/aux/` contains every
+training script, viz, comparison, diagnostic, and runpod launcher.
 
-- `src/pipeline/` — model defs + helpers used at inference time:
-  `cc_tokenizer{,_v2,_v3}.py`, `model_token_v10{,b}.py`,
-  `train_rf_a.py` (encoder features + number-crop classifier loader),
-  `train_rf_b.py` (RFB phase 2), `train_token_v10c_stage2.py`
-  (cross-attention forward + PAINTED_TO_21), `train_token_v6.py`
-  (N_NGS_X_CLASSES, build_targets), `train_token_v8.py`
-  (AugmentedHSetDataset), `train_dense_regression.py`,
-  `train_h_set_regressor.py`, `train_scene_refiner.py`, plus the
-  H-solver helpers `h_pnl_dlt.py`, `h_pnl_set_regressor.py`.
-- `src/homography/` — production homography modules: `field_model.py`,
-  `apply_homography.py`, `keypoints_from_tokens.py`,
-  `keypoint_track_bank.py`, `h_tracker.py` (HomographyTrackerLite +
-  smooth_hs + **loo_filter_and_replace** + **detect_bad_runs**),
-  `rectify.py` (legacy 3-specialist entry point, still works),
-  `specialists.py`, plus `painted_numbers.py`, `line_fit.py`,
-  `yardline_tracker.py`, `grid_solver_v2.py`, `distortion.py`.
-- `src/detector.py` — RF-DETR wrapper + detection cache.
-- `src/tracker.py` — `PlayerTracker` (field-coord Kalman, multi-cue
-  association, graveyard, color signatures).
-- `src/team_classifier.py` — post-tracking team labels
-  (`classify_teams_color_pca` is the canonical method; others kept for
-  ablation), `select_long_tracks`, `compute_color_signature` (used both
-  by tracker and team_classifier).
-- `src/smoothing.py` — Sav-Gol helpers for trajectory smoothing.
-- `src/pipeline.py` — high-level entry point (older; superseded in
-  practice by aux scripts that orchestrate the same flow).
-- `scripts/aux/viz/make_play_065_4panel.py` — single 1920×1080 viz:
-  source+corrs / tracker boxes / rectified / tracking dots, with BAD
-  RUN overlay if any.
-- `scripts/aux/compare/compare_ngs_play_065.py` — NGS validation
-  (snap-sweep + Hungarian match + per-player stats + side-by-side viz).
-- `scripts/aux/diagnostics/analyze_h_residuals.py` — single-clip LOO
-  residual report.
-- `scripts/aux/diagnostics/diagnose_h_filters.py` — multi-clip
-  old-vs-new filter confusion matrix.
-- `scripts/aux/runpod/` — RunPod launchers + the .sh wrappers that
-  bundle, upload, run, download per task. `launch_runpod.py` is the
-  general-purpose pod lifecycle tool (with `--min-upload` / `--min-download`
-  / `--country-code` / `--data-center-id` filters to avoid slow hosts).
-- `scripts/aux/training/` — training entry points for the 6 active
-  models: `train_phase1_pseudo.py`, `train_phase2_pseudo.py`,
-  `train_phase3_pseudo.py`, `train_unified_mask.py`,
-  `train_number_classifier.py`, `train_rfdetr.py`.
-- `scripts/aux/data_prep/` — 12 scripts that built the kept training
-  data: `segment_plays.py`, `convert_clips_30fps.py`,
-  `inject_intrinsics_into_manifest.py`, `build_smart_pool.py`,
-  `build_dense_field_training_pool.py`, `build_unified_mask_dataset.py`,
-  `build_qc_unified_mask_dataset.py`, `farm_pseudo_labels.py`,
-  `farm_pseudo_labels_all_clips.py`, `qc_pseudo_labels.py`,
-  `extract_crop_logits.py`, `build_round3_dataset.py`.
+### `src/` (production)
+
+```
+src/
+├── pipeline.py                  end-to-end orchestrator: clip → CSV
+├── field_mapping/               stage 1 — per-frame homography
+│   ├── pipeline.py              FieldMappingPipeline class
+│   ├── unet.py                  (none yet — UNet inlined in pipeline.py
+│   │                             via segmentation_models_pytorch)
+│   ├── tokenizer.py             mask → per-region tokens
+│   ├── encoder.py               TokenEncoder (phase 1)
+│   ├── crop_classifier.py       CropClassifier (DSResNet10ww)
+│   ├── number_refiner.py        NumberRefiner (phase 2)
+│   ├── token_labeler.py         TokenLabeler (phase 3, cross-attn)
+│   ├── keypoints.py             tokens → image↔NGS correspondences
+│   ├── homography.py            H solver + LOO + bridging + smoothing
+│   ├── keypoint_bank.py         bank validation for H candidates
+│   ├── apply_homography.py      pixel ↔ field projections
+│   ├── field_model.py           NFL field constants (FIELD_LENGTH, etc.)
+│   └── classes.py               NGS-x quantization, PAINTED_TO_21 etc.
+├── player_detection/            stage 2 — bounding boxes
+│   └── detector.py              RF-DETR wrapper + detection cache
+└── player_tracking/             stages 3+4+5
+    ├── tracker.py               field-coord Kalman + multi-cue assoc
+    ├── color_signature.py       24-dim chromatic feature
+    ├── team_classifier.py       color PCA + median split, select_long_tracks
+    └── trajectory_smoothing.py  per-track Sav-Gol
+```
+
+### `scripts/aux/`
+
+```
+scripts/aux/
+├── viz/four_panel_clip_overview.py    1920×1080 4-panel viz
+├── compare/compare_ngs.py             NGS comparison (single clip)
+├── diagnostics/
+│   ├── h_residual_report.py           single-clip LOO residual stats
+│   └── compare_h_filters.py           old-vs-new filter confusion
+├── runpod/                            RunPod lifecycle + per-task .sh runners
+│   ├── launch_runpod.py
+│   ├── four_panel_clip_overview_runpod.sh
+│   ├── compare_ngs_runpod.sh / compare_ngs_3plays_runpod.sh
+│   ├── h_residual_report_runpod.sh / compare_h_filters_runpod.sh
+│   ├── train_crop_classifier_runpod.sh
+│   └── requirements_farm_runpod.txt
+├── training/                          training scripts for the 8 models
+│   ├── train_encoder.py               (was train_phase1_pseudo)
+│   ├── train_number_refiner.py        (was train_phase2_pseudo)
+│   ├── train_token_labeler.py         (was train_phase3_pseudo)
+│   ├── train_unet.py                  (was train_unified_mask)
+│   ├── train_crop_classifier.py       DSResNet10ww (the production one)
+│   ├── train_crop_classifier_mit.py   MitClassifier variant (alternate)
+│   └── train_player_detector.py       (was train_rfdetr)
+└── data_prep/                         scripts that built kept training data
+    ├── segment_plays.py, convert_clips_30fps.py,
+    │   inject_intrinsics_into_manifest.py,
+    ├── build_smart_pool.py, build_dense_field_training_pool.py,
+    ├── build_unified_mask_dataset.py, build_qc_unified_mask_dataset.py,
+    ├── farm_pseudo_labels.py, farm_pseudo_labels_all_clips.py,
+    ├── qc_pseudo_labels.py, extract_crop_logits.py,
+    └── build_round3_dataset.py
+```
 
 ### Data
 - `data/h_pool_and_intrinsics.json` — combined: (1) hand-verified
