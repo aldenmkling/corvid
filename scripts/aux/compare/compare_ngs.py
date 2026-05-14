@@ -1,22 +1,25 @@
-"""Compare our tracker output for play_065 against NGS ground truth.
+"""Compare our tracker output against NGS ground truth for a single clip.
+
+Args:
+  --clip          path to sideline.mp4 (default: play_065)
+  --ngs-tsv       NGS TSV file for the matching playId
+  --snap-center   our-frame estimate where the NGS ball_snap event lines up
+                  (default 120 = ~4 sec @ 30 fps). Sweep ±60 frames.
+  --tag           output filename prefix (default: <game>_<play>)
 
 Pipeline:
-  1. Run the full pipeline on play_065 (classifier H + tracker + LOO filter
-     + SG smoothing). Per-track per-frame field_xy in NGS yards.
-  2. Load NGS TSV for play 1643 — 22 players × frames at 10 Hz.
-  3. Time-align: NGS `ball_snap` event marks t=0. Our clip starts before
-     the snap (~frame 120 ≈ 4 sec in). Sweep our-frame-of-snap candidate
-     in [60..180] at 10-Hz resolution; pick the offset that minimizes
-     total Hungarian assignment cost.
+  1. Run the full pipeline on the clip (classifier H + tracker + LOO
+     filter + SG smoothing). Per-track per-frame field_xy in NGS yards.
+  2. Load NGS TSV — 22 players × frames at 10 Hz.
+  3. Time-align: NGS `ball_snap` event marks t=0. Sweep our-frame-of-snap
+     candidate in [center-60, center+60] at 10-Hz resolution; pick the
+     offset that minimizes total Hungarian assignment cost.
   4. Position-only Hungarian: 22 NGS × N our_tracks cost matrix, cost =
      mean L2 distance (NGS yards) over overlapping aligned frames.
-  5. Score each matched pair: position RMSE, speed RMSE & correlation,
-     acceleration RMSE & correlation. (Speed from finite diff on positions
+  5. Score each matched pair: position RMSE, speed RMSE + correlation,
+     acceleration RMSE + correlation. (Speed from finite diff on positions
      for us; NGS has `s` column directly. Accel = derivative of speed.)
-  6. Output:
-       output/ngs_compare/play_065_per_player.csv  — per-player stats
-       output/ngs_compare/play_065_summary.txt     — aggregate
-       output/ngs_compare/play_065_compare.mp4     — side-by-side viz
+  6. Output: output/ngs_compare/<tag>_{per_player.csv, summary.txt, compare.mp4}
 """
 from __future__ import annotations
 

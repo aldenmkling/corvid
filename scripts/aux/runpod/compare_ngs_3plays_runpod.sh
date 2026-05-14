@@ -28,7 +28,7 @@ tar -czf "$TAR" \
     src \
     src/pipeline \
     scripts/aux/data_prep \
-    scripts/aux/compare/compare_ngs_play_065.py \
+    scripts/aux/compare/compare_ngs.py \
     scripts/aux/runpod/requirements_farm_runpod.txt \
     models/unet_unified_v8_yardside_recover/best.pth \
     models/token_only_v10_phase1_pseudo/best.pth \
@@ -56,17 +56,17 @@ $SSH "cd /workspace && tar -xzf payload.tar.gz && rm payload.tar.gz \
 
 echo "=== launching 3 NGS comparisons in background ==="
 $SSH "cd /workspace && source venv/bin/activate && nohup bash -c '
-python scripts/aux/compare/compare_ngs_play_065.py --device cuda \
+python scripts/aux/compare/compare_ngs.py --device cuda \
     --clip videos/clips/2019102712/play_011/sideline.mp4 \
     --ngs-tsv data/ngs/2019_GB_2019102712_282.tsv \
     --snap-center 300
 
-python scripts/aux/compare/compare_ngs_play_065.py --device cuda \
+python scripts/aux/compare/compare_ngs.py --device cuda \
     --clip videos/clips/2019102712/play_046/sideline.mp4 \
     --ngs-tsv data/ngs/2019_KC_2019102712_1205.tsv \
     --snap-center 120
 
-python scripts/aux/compare/compare_ngs_play_065.py --device cuda \
+python scripts/aux/compare/compare_ngs.py --device cuda \
     --clip videos/clips/2019102712/play_118/sideline.mp4 \
     --ngs-tsv data/ngs/2019_GB_2019102712_3067.tsv \
     --snap-center 120

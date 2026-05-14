@@ -26,7 +26,7 @@ tar -czf "$TAR" \
     src \
     src/pipeline \
     scripts/aux/data_prep \
-    scripts/aux/compare/compare_ngs_play_065.py \
+    scripts/aux/compare/compare_ngs.py \
     scripts/aux/runpod/requirements_farm_runpod.txt \
     models/unet_unified_v8_yardside_recover/best.pth \
     models/token_only_v10_phase1_pseudo/best.pth \
@@ -50,7 +50,7 @@ $SSH "cd /workspace && tar -xzf payload.tar.gz && rm payload.tar.gz \
 
 echo "=== running NGS compare ==="
 $SSH "cd /workspace && source venv/bin/activate \
-    && python scripts/aux/compare/compare_ngs_play_065.py --device cuda 2>&1"
+    && python scripts/aux/compare/compare_ngs.py --device cuda 2>&1"
 
 echo "=== downloading outputs ==="
 mkdir -p "$ROOT/output/ngs_compare"
