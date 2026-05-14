@@ -299,7 +299,8 @@ def make_painted_logits_fn(crop_ckpt: str, arch: str, device: torch.device):
     """Wraps make_backbone_logits_fn (which returns 9-D logits in
     train_number_classifier.CLASSES order). Re-arrange to painted order
     20→0, 30→1, ..., 100→8."""
-    from train_number_classifier import CLASSES as TRAIN_CLASSES
+    # Number-classifier class order (matches scripts/aux/training/train_number_classifier.py::CLASSES).
+    TRAIN_CLASSES = ["10L", "10R", "20L", "20R", "30L", "30R", "40L", "40R", "50"]
     base_fn = make_backbone_logits_fn(crop_ckpt, arch, device)
     # Map indices: train order → painted order.
     name_to_painted = {

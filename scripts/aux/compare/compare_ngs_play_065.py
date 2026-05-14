@@ -651,23 +651,42 @@ def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="mps")
+    ap.add_argument("--clip", default="videos/clips/2019092204/play_065/sideline.mp4",
+                    help="Path to sideline.mp4 (relative to project root).")
+    ap.add_argument("--ngs-tsv", default="data/ngs/2019_KC_2019092204_1643.tsv",
+                    help="Path to NGS TSV (relative to project root).")
+    ap.add_argument("--tag", default=None,
+                    help="Output tag (default: <game>_<play>).")
+    ap.add_argument("--snap-center", type=int, default=None,
+                    help="Center of snap-frame sweep in our-clip frames "
+                         "(default: 120 = 4 sec @ 30 fps).")
     args = ap.parse_args()
     device = torch.device(args.device)
 
-    clip_path = os.path.join(PROJECT_ROOT,
-                              "videos/clips/2019092204/play_065/sideline.mp4")
-    ngs_path = "/Users/aldenkling/Desktop/Personal Research/" \
-               "ngs_highlights-master/play_data/2019_KC_2019092204_1643.tsv"
-    # On RunPod, override:
+    clip_path = (args.clip if os.path.isabs(args.clip)
+                 else os.path.join(PROJECT_ROOT, args.clip))
+    ngs_path = (args.ngs_tsv if os.path.isabs(args.ngs_tsv)
+                else os.path.join(PROJECT_ROOT, args.ngs_tsv))
+    if not os.path.exists(clip_path):
+        raise FileNotFoundError(f"Clip not found: {clip_path}")
     if not os.path.exists(ngs_path):
-        alt = os.path.join(PROJECT_ROOT, "data", "ngs",
-                            "2019_KC_2019092204_1643.tsv")
-        if os.path.exists(alt):
-            ngs_path = alt
-        else:
-            raise FileNotFoundError(f"NGS TSV not found: {ngs_path} or {alt}")
+        raise FileNotFoundError(f"NGS TSV not found: {ngs_path}")
+
+    rel_clip = os.path.relpath(clip_path, os.path.join(PROJECT_ROOT, "videos/clips"))
+    parts = rel_clip.split(os.sep)
+    tag = args.tag if args.tag else (f"{parts[0]}_{parts[1]}" if len(parts) >= 2
+                                       else "clip")
+
+    if args.snap_center is not None:
+        global SWEEP_FRAME_CENTER
+        SWEEP_FRAME_CENTER = args.snap_center
+
     out_dir = os.path.join(PROJECT_ROOT, "output", "ngs_compare")
     os.makedirs(out_dir, exist_ok=True)
+    print(f"\n========== {tag} ==========")
+    print(f"  clip: {rel_clip}")
+    print(f"  ngs: {os.path.basename(ngs_path)}")
+    print(f"  sweep center: frame {SWEEP_FRAME_CENTER}\n")
 
     manifest = json.load(open(os.path.join(
         PROJECT_ROOT, "data/h_pool_and_intrinsics.json")))
@@ -728,12 +747,12 @@ def main():
              "speed_mean_us_yds", "speed_mean_ngs_yds",
              "accel_rmse_yds2", "accel_corr"]
     df = df[[c for c in front if c in df.columns]]
-    csv_path = os.path.join(out_dir, "play_065_per_player.csv")
+    csv_path = os.path.join(out_dir, f"{tag}_per_player.csv")
     df.to_csv(csv_path, index=False)
     print(f"\n  → {csv_path}")
 
     # ── Summary ──────────────────────────────────────────────────────────────
-    summary_path = os.path.join(out_dir, "play_065_summary.txt")
+    summary_path = os.path.join(out_dir, f"{tag}_summary.txt")
     with open(summary_path, "w") as f:
         f.write(f"# play_065 vs NGS (TSV: 2019_KC_2019092204_1643.tsv)\n\n")
         f.write(f"Our cutoff frames: {cutoff} @ {OUR_FPS} fps\n")
@@ -765,7 +784,7 @@ def main():
     # ── Render comparison viz ────────────────────────────────────────────────
     print("\n[render] side-by-side comparison viz ...")
     matches = {"track_to_player": track_to_player}
-    viz_path = os.path.join(out_dir, "play_065_compare.mp4")
+    viz_path = os.path.join(out_dir, f"{tag}_compare.mp4")
     render_compare(viz_path, dot_field, ngs_by_player, players_meta,
                      best_offset, snap_frame_ngs, cutoff, matches)
     print(f"  → {viz_path}")
