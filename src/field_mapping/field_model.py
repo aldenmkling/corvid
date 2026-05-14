@@ -117,3 +117,12 @@ def get_number_positions() -> list[tuple[np.ndarray, int]]:
             positions.append((np.array([x, NUMBER_Y_NEAR]), num))
             positions.append((np.array([x, NUMBER_Y_FAR]), num))
     return positions
+
+
+# ── Painted-number tangent points (inside edges) ────────────────────────────
+# Where the painted yardline number's "inside" (toward field center) edge sits
+# in NGS-y coordinates. Used as keypoint tangents in field_mapping/keypoints.py.
+NUMBER_Y_NEAR = 13.0   # near-sideline-side painted number outer edge
+NUMBER_Y_FAR = 40.33   # far-sideline-side painted number outer edge
+NGS_Y_NEAR_INSIDE = NUMBER_Y_NEAR + 1.0   # 14.0 — inside edge of near number
+NGS_Y_FAR_INSIDE = NUMBER_Y_FAR - 1.0     # 39.33 — inside edge of far number
