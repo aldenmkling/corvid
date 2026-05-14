@@ -1,4 +1,0 @@
-timm
-segmentation-models-pytorch
-albumentations
-opencv-python

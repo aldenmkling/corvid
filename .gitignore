@@ -52,9 +52,18 @@ data/field_keypoints_hash_only/
 data/hash_masks/
 # Painted-number classifier crops (auto-mined from rectify pipeline)
 data/number_classifier/
+# Pseudo-labeled training pool (regeneratable via farm_pseudo_labels.py)
+data/pseudo_labels/
+data/pseudo_labels_crops/
+# Unified mask training data (regeneratable via build_unified_mask_dataset.py)
+data/unified_masks/
 
 # Output (generated images, tracking results)
 output/
+# Track only the small NGS-comparison artifacts; ignore the big mp4s.
+!output/ngs_compare/
+!output/ngs_compare/*.csv
+!output/ngs_compare/*.txt
 
 # macOS
 .DS_Store

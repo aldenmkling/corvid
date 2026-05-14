@@ -1,5 +1,0 @@
-timm
-albumentations
-pycocotools
-wandb
-opencv-python

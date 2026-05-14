@@ -1,2 +1,0 @@
-# RF-DETR training dependencies for RunPod
-rfdetr[train,loggers]
