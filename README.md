@@ -1,8 +1,8 @@
 # corvid — All-22 → NGS player tracking
 
-Named for crows, which recognize individual human faces and remember them
-across years: the same per-individual re-identification problem this
-pipeline solves frame to frame.
+Named for crows because the pipeline manufactures a bird's-eye view of
+the field from a single ground-level sideline camera, recovering top-down
+NGS-yard coordinates frame by frame.
 
 End-to-end computer-vision pipeline that turns NFL All-22 sideline-wide
 video into NGS-style player tracking data: per-frame `(x, y)` in NGS yards
