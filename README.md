@@ -1,9 +1,5 @@
 # corvid — All-22 → NGS player tracking
 
-Named for crows because the pipeline manufactures a bird's-eye view of
-the field from a single ground-level sideline camera, recovering top-down
-NGS-yard coordinates frame by frame.
-
 End-to-end computer-vision pipeline that turns NFL All-22 sideline-wide
 video into NGS-style player tracking data: per-frame `(x, y)` in NGS yards
 for every player on the field.
